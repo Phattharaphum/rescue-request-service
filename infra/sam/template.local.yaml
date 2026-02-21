@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Rescue Request Service — SAM local development template (LocalStack)
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        AWS_REGION: us-east-1
+        AWS_ACCESS_KEY_ID: test
+        AWS_SECRET_ACCESS_KEY: test
+        DYNAMODB_TABLE_NAME: rescue-requests
+        SNS_TOPIC_ARN_CREATED: arn:aws:sns:us-east-1:000000000000:rescue-request-created
+        SNS_TOPIC_ARN_STATUS_CHANGED: arn:aws:sns:us-east-1:000000000000:rescue-request-status-changed
+        INCIDENT_SERVICE_URL: http://host.docker.internal:3001
+        INCIDENT_SERVICE_TIMEOUT_MS: "3000"
+        LOG_LEVEL: debug
+
+Resources:
+  RescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      CodeUri: ../../dist/
+      Events:
+        PostRequests:
+          Type: Api
+          Properties:
+            Path: /v1/requests
+            Method: POST
+        GetRequests:
+          Type: Api
+          Properties:
+            Path: /v1/requests
+            Method: GET
+        GetRequestById:
+          Type: Api
+          Properties:
+            Path: /v1/requests/{id}
+            Method: GET
+        PatchStatus:
+          Type: Api
+          Properties:
+            Path: /v1/requests/{id}/status
+            Method: PATCH

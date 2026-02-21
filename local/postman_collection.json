@@ -1,0 +1,79 @@
+{
+  "info": {
+    "name": "Rescue Request Service",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "requestId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Create Rescue Request",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/v1/requests", "host": ["{{baseUrl}}"], "path": ["v1", "requests"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"incidentId\": \"INC-2024-001\",\n  \"requesterName\": \"Alice Johnson\",\n  \"description\": \"Person trapped on rooftop after flooding\",\n  \"location\": \"123 Maple Street, Springfield\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get Rescue Request by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/v1/requests/{{requestId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "requests", "{{requestId}}"]
+        }
+      }
+    },
+    {
+      "name": "Search Rescue Requests by incidentId",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/v1/requests?incidentId=INC-2024-001",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "requests"],
+          "query": [
+            { "key": "incidentId", "value": "INC-2024-001" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Patch Rescue Request Status",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/requests/{{requestId}}/status",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "requests", "{{requestId}}", "status"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"DISPATCHED\",\n  \"reason\": \"Unit dispatched to location\",\n  \"version\": 1\n}"
+        }
+      }
+    }
+  ]
+}

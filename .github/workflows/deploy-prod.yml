@@ -1,0 +1,47 @@
+name: Deploy to Prod
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy (prod)
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: bash scripts/build.sh
+
+      - name: Package Lambda
+        run: bash scripts/package.sh
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy to prod
+        env:
+          RESCUE_REQUEST_S3_BUCKET: ${{ secrets.RESCUE_REQUEST_S3_BUCKET_PROD }}
+        run: bash scripts/deploy.sh prod

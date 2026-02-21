@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Rescue Request Service infrastructure
+
+Parameters:
+  Stage:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: Deployment stage
+
+  TableName:
+    Type: String
+    Default: rescue-requests
+    Description: DynamoDB table name
+
+  LambdaMemory:
+    Type: Number
+    Default: 256
+    MinValue: 128
+    MaxValue: 3008
+
+  LambdaTimeout:
+    Type: Number
+    Default: 30
+    MinValue: 3
+    MaxValue: 900
+
+Resources:
+
+  # ---- DynamoDB ----
+  RescueRequestsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub "${TableName}-${Stage}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: requestId
+          AttributeType: S
+        - AttributeName: incidentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requestId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: incidentId-index
+          KeySchema:
+            - AttributeName: incidentId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  # ---- SNS Topics ----
+  RescueRequestCreatedTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "rescue-request-created-${Stage}"
+
+  RescueRequestStatusChangedTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "rescue-request-status-changed-${Stage}"
+
+  # ---- SQS Dead Letter Queue ----
+  LambdaDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "rescue-request-dlq-${Stage}"
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  # ---- IAM Role ----
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "rescue-request-lambda-role-${Stage}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: RescueRequestServicePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt RescueRequestsTable.Arn
+                  - !Sub "${RescueRequestsTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Ref RescueRequestCreatedTopic
+                  - !Ref RescueRequestStatusChangedTopic
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt LambdaDLQ.Arn
+
+  # ---- Lambda Function ----
+  RescueRequestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "rescue-request-service-${Stage}"
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: !Ref LambdaMemory
+      Timeout: !Ref LambdaTimeout
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 200, body: 'placeholder' });
+      DeadLetterConfig:
+        TargetArn: !GetAtt LambdaDLQ.Arn
+      Environment:
+        Variables:
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          DYNAMODB_TABLE_NAME: !Sub "${TableName}-${Stage}"
+          SNS_TOPIC_ARN_CREATED: !Ref RescueRequestCreatedTopic
+          SNS_TOPIC_ARN_STATUS_CHANGED: !Ref RescueRequestStatusChangedTopic
+          LOG_LEVEL: info
+
+  # ---- API Gateway ----
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "rescue-request-api-${Stage}"
+      Description: Rescue Request Service REST API
+      EndpointConfiguration:
+        Types: [REGIONAL]
+
+  V1Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: v1
+
+  RequestsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref V1Resource
+      PathPart: requests
+
+  RequestByIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref RequestsResource
+      PathPart: "{id}"
+
+  RequestStatusResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref RequestByIdResource
+      PathPart: status
+
+  LambdaPermissionApiGateway:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RescueRequestFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*"
+
+  PostRequestsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RequestsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RescueRequestFunction.Arn}/invocations"
+
+  GetRequestsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RequestsResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RescueRequestFunction.Arn}/invocations"
+
+  GetRequestByIdMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RequestByIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RescueRequestFunction.Arn}/invocations"
+
+  PatchStatusMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RequestStatusResource
+      HttpMethod: PATCH
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RescueRequestFunction.Arn}/invocations"
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PostRequestsMethod
+      - GetRequestsMethod
+      - GetRequestByIdMethod
+      - PatchStatusMethod
+    Properties:
+      RestApiId: !Ref RestApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: !Ref Stage
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway base URL
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+
+  DynamoDBTableName:
+    Value: !Ref RescueRequestsTable
+
+  CreatedTopicArn:
+    Value: !Ref RescueRequestCreatedTopic
+
+  StatusChangedTopicArn:
+    Value: !Ref RescueRequestStatusChangedTopic
+
+  LambdaFunctionName:
+    Value: !Ref RescueRequestFunction
