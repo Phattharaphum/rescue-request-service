@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "Stage",
+    "ParameterValue": "prod"
+  },
+  {
+    "ParameterKey": "TableName",
+    "ParameterValue": "rescue-requests"
+  },
+  {
+    "ParameterKey": "LambdaMemory",
+    "ParameterValue": "512"
+  },
+  {
+    "ParameterKey": "LambdaTimeout",
+    "ParameterValue": "30"
+  }
+]

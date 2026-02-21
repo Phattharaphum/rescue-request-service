@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rescue.request.status-changed.v1",
+  "type": "object",
+  "required": ["eventId", "eventType", "version", "timestamp", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this event occurrence"
+    },
+    "eventType": {
+      "type": "string",
+      "const": "rescue.request.status-changed.v1"
+    },
+    "version": {
+      "type": "string",
+      "const": "1"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object",
+      "required": ["requestId", "previousStatus", "newStatus", "changedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "previousStatus": {
+          "type": "string",
+          "enum": ["PENDING", "DISPATCHED", "RESOLVED", "CANCELLED"]
+        },
+        "newStatus": {
+          "type": "string",
+          "enum": ["PENDING", "DISPATCHED", "RESOLVED", "CANCELLED"]
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "changedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

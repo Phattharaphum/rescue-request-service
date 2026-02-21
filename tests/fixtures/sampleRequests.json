@@ -1,0 +1,38 @@
+[
+  {
+    "requestId": "a1b2c3d4-0001-4000-8000-000000000001",
+    "incidentId": "INC-2024-001",
+    "requesterName": "Alice Johnson",
+    "description": "Person trapped on rooftop after flash flooding",
+    "location": "123 Maple Street, Springfield",
+    "status": "PENDING",
+    "version": 1,
+    "createdAt": "2024-03-15T08:30:00.000Z",
+    "updatedAt": "2024-03-15T08:30:00.000Z",
+    "idempotencyKey": "abc123hash001"
+  },
+  {
+    "requestId": "a1b2c3d4-0002-4000-8000-000000000002",
+    "incidentId": "INC-2024-002",
+    "requesterName": "Bob Martinez",
+    "description": "Elderly resident requiring medical evacuation due to wildfire",
+    "location": "456 Oak Avenue, Riverdale",
+    "status": "DISPATCHED",
+    "version": 2,
+    "createdAt": "2024-03-15T09:00:00.000Z",
+    "updatedAt": "2024-03-15T09:45:00.000Z",
+    "idempotencyKey": "abc123hash002"
+  },
+  {
+    "requestId": "a1b2c3d4-0003-4000-8000-000000000003",
+    "incidentId": "INC-2024-003",
+    "requesterName": "Carol Chen",
+    "description": "Family of four stranded after bridge collapse",
+    "location": "789 Pine Road, Lakewood",
+    "status": "RESOLVED",
+    "version": 3,
+    "createdAt": "2024-03-14T14:00:00.000Z",
+    "updatedAt": "2024-03-14T18:30:00.000Z",
+    "idempotencyKey": "abc123hash003"
+  }
+]

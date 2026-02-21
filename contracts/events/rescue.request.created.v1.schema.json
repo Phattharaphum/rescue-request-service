@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rescue.request.created.v1",
+  "type": "object",
+  "required": ["eventId", "eventType", "version", "timestamp", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this event occurrence"
+    },
+    "eventType": {
+      "type": "string",
+      "const": "rescue.request.created.v1"
+    },
+    "version": {
+      "type": "string",
+      "const": "1"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object",
+      "required": ["requestId", "incidentId", "requesterName", "status", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "incidentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requesterName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "const": "PENDING"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
