@@ -20,7 +20,6 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.540.0",
     "@types/aws-lambda": "^8.10.136",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.30",
