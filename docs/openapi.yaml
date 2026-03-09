@@ -1,0 +1,1701 @@
+﻿openapi: 3.0.3
+
+info:
+  title: Rescue Request Service API
+  description: |
+    REST API for managing disaster rescue requests.
+
+    ## Overview
+
+    The Rescue Request Service enables citizens to submit rescue requests during disasters and allows
+    emergency-response staff to triage, assign, and resolve those requests through a defined state machine.
+
+    ## API Groups
+
+    | Group | Base Path | Audience |
+    |-------|-----------|----------|
+    | Public | `/v1` | Citizens (no authentication required) |
+    | Staff | `/v1` | Emergency-response staff |
+    | Commands | `/v1` | Staff â€” state-machine transitions |
+
+    ## State Machine
+
+    ```
+    SUBMITTED â†’ TRIAGED â†’ ASSIGNED â†’ IN_PROGRESS â†’ RESOLVED
+        â”‚           â”‚          â”‚            â”‚
+        â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â–¶ CANCELLED
+    ```
+
+    * **Terminal states**: `RESOLVED`, `CANCELLED` â€” no further transitions are allowed.
+    * `ASSIGNED` requires a `responderUnitId` in the request body.
+    * `CANCELLED` requires a `reason` in the request body.
+
+    ## Idempotency
+
+    Mutating endpoints accept an optional `X-Idempotency-Key` header (UUID v4).
+
+    | Scenario | Behaviour |
+    |----------|-----------|
+    | New key | Executes the operation and stores the result |
+    | Same key + same payload | Replays the stored response |
+    | Same key + different payload | Returns `409 Conflict` |
+
+    Keys expire after **24 hours**.
+
+    ## Pagination
+
+    List endpoints use cursor-based pagination.
+
+    | Parameter | Type | Default | Limits |
+    |-----------|------|---------|--------|
+    | `limit` | integer | 20 | 1 â€“ 100 |
+    | `cursor` | string | â€” | Base64-encoded token from previous response |
+
+    ## Error Format
+
+    All error responses share this structure:
+
+    ```json
+    {
+      "message": "Human-readable description",
+      "traceId": "uuid",
+      "details": [
+        { "field": "fieldName", "issue": "what is wrong" }
+      ]
+    }
+    ```
+  version: "1.0.0"
+  contact:
+    name: Rescue Request Service
+
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com/{stage}/v1
+    description: AWS API Gateway
+    variables:
+      apiId:
+        default: "xxxxxxxxxx"
+        description: API Gateway ID
+      region:
+        default: "ap-southeast-1"
+        description: AWS region
+      stage:
+        default: "dev"
+        enum: [dev, prod, local]
+
+tags:
+  - name: Public
+    description: Citizen-facing endpoints â€” no authentication required
+  - name: Staff
+    description: Staff-facing endpoints for managing rescue requests
+  - name: Commands
+    description: State-machine command endpoints that advance a request's lifecycle
+
+paths:
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  #  PUBLIC ENDPOINTS
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /rescue-requests:
+    post:
+      tags: [Public]
+      operationId: createRescueRequest
+      summary: Create a new rescue request
+      description: |
+        Submits a new rescue request on behalf of a citizen.
+
+        The service returns a `trackingCode` that the citizen can later use together with
+        their phone number to look up the status of their request.
+
+        **Duplicate detection** â€” if a request with the same incident, phone number, request
+        type, approximate location, and submission time (within a 5-minute window) already
+        exists, a `409 Conflict` is returned instead of creating a new record.
+
+        Idempotency is supported via `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientIP'
+        - $ref: '#/components/parameters/UserAgent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRescueRequestBody'
+            example:
+              incidentId: "INC-2024-001"
+              requestType: "FLOOD"
+              description: "Water level rising rapidly, 5 people trapped on second floor"
+              peopleCount: 5
+              latitude: 13.7563
+              longitude: 100.5018
+              contactName: "Somchai Jaidee"
+              contactPhone: "0812345678"
+              sourceChannel: "MOBILE"
+              specialNeeds: "Elderly person, needs wheelchair"
+              locationDetails: "Yellow house next to the big banyan tree"
+              province: "Bangkok"
+              district: "Bang Rak"
+              subdistrict: "Bang Rak"
+              addressLine: "123 Silom Road"
+      responses:
+        '201':
+          description: Rescue request created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRescueRequestResponse'
+              example:
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                trackingCode: "123456"
+                status: "SUBMITTED"
+                submittedAt: "2024-01-15T10:30:00.000000+00:00"
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /citizen/tracking/lookup:
+    post:
+      tags: [Public]
+      operationId: citizenTrackingLookup
+      summary: Look up a request by phone number and tracking code
+      description: |
+        Returns the `requestId` and `incidentId` associated with a citizen's phone number
+        and the tracking code they received when submitting their request.
+
+        Both `contactPhone` and `trackingCode` are required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CitizenTrackingLookupBody'
+            example:
+              contactPhone: "0812345678"
+              trackingCode: "123456"
+      responses:
+        '200':
+          description: Matching request found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitizenTrackingLookupResponse'
+              example:
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                incidentId: "INC-2024-001"
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /citizen/rescue-requests/{requestId}/status:
+    get:
+      tags: [Public]
+      operationId: getCitizenStatus
+      summary: Get the current status of a rescue request (citizen view)
+      description: |
+        Returns a simplified status summary intended for display to the citizen.
+        This endpoint does not require authentication.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Current status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitizenStatusResponse'
+              example:
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                status: "ASSIGNED"
+                priorityLevel: "HIGH"
+                assignedUnitId: "UNIT-007"
+                lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+                stateVersion: 3
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /citizen/rescue-requests/{requestId}/updates:
+    post:
+      tags: [Public]
+      operationId: createCitizenUpdate
+      summary: Submit an update to a rescue request
+      description: |
+        Allows a citizen to provide additional information about their request after
+        it has been submitted (e.g. updated location, changed head count, or a note
+        for responders).
+
+        Cannot be called on requests that are already in a terminal state
+        (`RESOLVED` or `CANCELLED`).
+
+        Idempotency is supported via `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientIP'
+        - $ref: '#/components/parameters/UserAgent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCitizenUpdateBody'
+            example:
+              updateType: "PEOPLE_COUNT"
+              updatePayload:
+                peopleCount: 7
+      responses:
+        '201':
+          description: Update recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCitizenUpdateResponse'
+              example:
+                updateId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                updateType: "PEOPLE_COUNT"
+                createdAt: "2024-01-15T10:45:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags: [Public]
+      operationId: listCitizenUpdates
+      summary: List citizen-submitted updates for a request
+      description: |
+        Returns a paginated list of all updates that have been submitted by the
+        citizen for the given rescue request, sorted by creation time.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: since
+          in: query
+          description: ISO-8601 timestamp â€” only return updates created after this time
+          schema:
+            type: string
+            format: date-time
+          example: "2024-01-15T10:00:00Z"
+      responses:
+        '200':
+          description: List of citizen updates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListCitizenUpdatesResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  #  STAFF ENDPOINTS
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /rescue-requests/{requestId}:
+    get:
+      tags: [Staff]
+      operationId: getRescueRequest
+      summary: Get full details of a rescue request
+      description: |
+        Retrieves the master record and current state of a rescue request.
+        Optionally includes the full status-event history and citizen-submitted updates.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - name: includeEvents
+          in: query
+          description: When `true`, embeds the status-event history in the response
+          schema:
+            type: boolean
+            default: false
+        - name: includeCitizenUpdates
+          in: query
+          description: When `true`, embeds citizen-submitted updates in the response
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Full rescue request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetRescueRequestResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags: [Staff]
+      operationId: patchRescueRequest
+      summary: Update editable fields of a rescue request
+      description: |
+        Partially updates the master record of a rescue request.
+
+        **Allowed fields**: `description`, `peopleCount`, `specialNeeds`,
+        `locationDetails`, `addressLine`.
+
+        Fields such as `incidentId`, `status`, and `requestId` cannot be modified
+        through this endpoint and will be rejected with `422`.
+
+        Cannot be called on requests in a terminal state (`RESOLVED` or `CANCELLED`).
+
+        Supports optimistic locking via the `If-Match` header (pass the current
+        `stateVersion` as the value). Idempotency is supported via `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchRescueRequestBody'
+            example:
+              description: "Updated: water level now at 1.5 m, 7 people trapped"
+              peopleCount: 7
+      responses:
+        '200':
+          description: Fields updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchRescueRequestResponse'
+              example:
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                updated: ["description", "peopleCount"]
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/events:
+    get:
+      tags: [Staff]
+      operationId: listStatusEvents
+      summary: List the status-event history of a rescue request
+      description: |
+        Returns a paginated, ordered list of all status-change events recorded for
+        the given rescue request.
+
+        Use `sinceVersion` to fetch only events after a known version number.
+        Use `order=DESC` to retrieve events newest-first.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: sinceVersion
+          in: query
+          description: Return only events with a version number greater than this value
+          schema:
+            type: integer
+            minimum: 0
+          example: 2
+        - name: order
+          in: query
+          description: Sort direction for results
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: ASC
+      responses:
+        '200':
+          description: Paginated list of status events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListStatusEventsResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Staff]
+      operationId: appendStatusEvent
+      summary: Append a status-change event (generic)
+      description: |
+        Appends an arbitrary status-change event to the request's event log.
+        Use this endpoint when you need fine-grained control over the transition.
+        For standard lifecycle transitions prefer the dedicated command endpoints
+        (`/triage`, `/assign`, `/start`, `/resolve`, `/cancel`).
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendStatusEventBody'
+            example:
+              newStatus: "TRIAGED"
+              changedBy: "staff-001"
+              changedByRole: "dispatcher"
+              reason: "Request verified, forwarding to field team"
+      responses:
+        '200':
+          description: Status event appended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTransitionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/current:
+    get:
+      tags: [Staff]
+      operationId: getCurrentState
+      summary: Get the current state snapshot of a rescue request
+      description: |
+        Returns the latest state snapshot, including the current status, assigned unit,
+        priority, and version counter.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Current state snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentStateResponse'
+              example:
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                incidentId: "INC-2024-001"
+                lastEventId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                stateVersion: 3
+                status: "ASSIGNED"
+                priorityScore: 85.5
+                priorityLevel: "HIGH"
+                assignedUnitId: "UNIT-007"
+                assignedAt: "2024-01-15T11:00:00.000000+00:00"
+                latestNote: "Team dispatched, ETA 15 minutes"
+                lastUpdatedBy: "staff-001"
+                lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /incidents/{incidentId}/rescue-requests:
+    get:
+      tags: [Staff]
+      operationId: listByIncident
+      summary: List rescue requests belonging to an incident
+      description: |
+        Returns a paginated list of rescue request summaries for the given incident.
+        Optionally filtered by status.
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          description: Incident identifier
+          schema:
+            type: string
+          example: "INC-2024-001"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          description: Filter by request status
+          schema:
+            $ref: '#/components/schemas/RequestStatus'
+      responses:
+        '200':
+          description: Paginated list of request summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListByIncidentResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /idempotency-keys/{idempotencyKeyHash}:
+    get:
+      tags: [Staff]
+      operationId: getIdempotencyRecord
+      summary: Get an idempotency key record
+      description: |
+        Retrieves the stored idempotency record for a given SHA-256 key hash.
+        Useful for debugging replayed or in-flight requests.
+
+        The response body and request fingerprint are omitted by default.
+        Use the query parameters below to include them.
+      parameters:
+        - name: idempotencyKeyHash
+          in: path
+          required: true
+          description: SHA-256 hash of the original idempotency key
+          schema:
+            type: string
+          example: "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3"
+        - name: includeResponse
+          in: query
+          description: When `true`, includes `responseStatusCode` and `responseBody` in the response
+          schema:
+            type: boolean
+            default: false
+        - name: includeRequestFingerprint
+          in: query
+          description: When `true`, includes the SHA-256 fingerprint of the original request body
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Idempotency record found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdempotencyRecordResponse'
+              example:
+                idempotencyKeyHash: "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3"
+                operationName: "CreateRescueRequest"
+                status: "COMPLETED"
+                createdAt: "2024-01-15T10:30:00.000000+00:00"
+                updatedAt: "2024-01-15T10:30:01.000000+00:00"
+                resultResourceId: "550e8400-e29b-41d4-a716-446655440000"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  #  COMMAND ENDPOINTS (State Machine)
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /rescue-requests/{requestId}/triage:
+    post:
+      tags: [Commands]
+      operationId: triageRescueRequest
+      summary: Triage a submitted request (SUBMITTED â†’ TRIAGED)
+      description: |
+        Advances a rescue request from `SUBMITTED` to `TRIAGED`.
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandBody'
+            example:
+              changedBy: "dispatcher-01"
+              changedByRole: "dispatcher"
+              priorityScore: 75.0
+              priorityLevel: "HIGH"
+              note: "Verified â€” forwarding to field team Alpha"
+      responses:
+        '200':
+          description: Transition applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTransitionResponse'
+              example:
+                eventId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                previousStatus: "SUBMITTED"
+                newStatus: "TRIAGED"
+                version: 2
+                occurredAt: "2024-01-15T10:35:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/assign:
+    post:
+      tags: [Commands]
+      operationId: assignRescueRequest
+      summary: Assign a responder unit (TRIAGED â†’ ASSIGNED)
+      description: |
+        Advances a rescue request from `TRIAGED` to `ASSIGNED` and records
+        the responding unit.
+
+        **`responderUnitId` is required** in the request body.
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandBody'
+                - type: object
+                  required: [responderUnitId]
+                  properties:
+                    responderUnitId:
+                      type: string
+                      description: Identifier of the assigned responder unit
+                      example: "UNIT-007"
+            example:
+              responderUnitId: "UNIT-007"
+              changedBy: "dispatcher-01"
+              changedByRole: "dispatcher"
+      responses:
+        '200':
+          description: Transition applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTransitionResponse'
+              example:
+                eventId: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                previousStatus: "TRIAGED"
+                newStatus: "ASSIGNED"
+                version: 3
+                occurredAt: "2024-01-15T10:40:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/start:
+    post:
+      tags: [Commands]
+      operationId: startRescueRequest
+      summary: Start the rescue operation (ASSIGNED â†’ IN_PROGRESS)
+      description: |
+        Advances a rescue request from `ASSIGNED` to `IN_PROGRESS`.
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandBody'
+            example:
+              changedBy: "unit-leader-007"
+              changedByRole: "field_officer"
+              note: "On site, beginning rescue"
+      responses:
+        '200':
+          description: Transition applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTransitionResponse'
+              example:
+                eventId: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                previousStatus: "ASSIGNED"
+                newStatus: "IN_PROGRESS"
+                version: 4
+                occurredAt: "2024-01-15T11:15:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/resolve:
+    post:
+      tags: [Commands]
+      operationId: resolveRescueRequest
+      summary: Resolve a rescue request (IN_PROGRESS â†’ RESOLVED)
+      description: |
+        Advances a rescue request from `IN_PROGRESS` to `RESOLVED`.
+        This is a **terminal transition** â€” the request cannot be modified further.
+
+        Publishes both `rescue-request.status-changed` and `rescue-request.resolved`
+        SNS events.
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandBody'
+            example:
+              changedBy: "unit-leader-007"
+              changedByRole: "field_officer"
+              note: "All 5 persons safely evacuated"
+      responses:
+        '200':
+          description: Request resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTransitionResponse'
+              example:
+                eventId: "d4e5f6a7-b8c9-0123-defa-234567890123"
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                previousStatus: "IN_PROGRESS"
+                newStatus: "RESOLVED"
+                version: 5
+                occurredAt: "2024-01-15T12:00:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/cancel:
+    post:
+      tags: [Commands]
+      operationId: cancelRescueRequest
+      summary: Cancel a rescue request (* â†’ CANCELLED)
+      description: |
+        Cancels a rescue request from any non-terminal state.
+        This is a **terminal transition** â€” the request cannot be modified further.
+
+        **`reason` is required** in the request body.
+
+        Publishes both `rescue-request.status-changed` and `rescue-request.cancelled`
+        SNS events.
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandBody'
+                - type: object
+                  required: [reason]
+                  properties:
+                    reason:
+                      type: string
+                      description: Reason for cancellation
+                      example: "Citizen confirmed safe, rescue no longer needed"
+            example:
+              reason: "Citizen confirmed safe, rescue no longer needed"
+              changedBy: "dispatcher-01"
+              changedByRole: "dispatcher"
+      responses:
+        '200':
+          description: Request cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTransitionResponse'
+              example:
+                eventId: "e5f6a7b8-c9d0-1234-efab-345678901234"
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                previousStatus: "TRIAGED"
+                newStatus: "CANCELLED"
+                version: 3
+                occurredAt: "2024-01-15T10:50:00.000000+00:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  COMPONENTS
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+components:
+
+  # â”€â”€ Parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  parameters:
+
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      description: Unique rescue request identifier (UUID v4)
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Client-generated UUID v4 used to make mutating requests idempotent.
+        Sending the same key with the same payload within 24 hours returns
+        the original response without re-executing the operation.
+      schema:
+        type: string
+        format: uuid
+      example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        Expected `stateVersion` of the request for optimistic concurrency control.
+        If the current version differs, the server returns `409 Conflict`.
+      schema:
+        type: integer
+        minimum: 1
+      example: 3
+
+    ClientIP:
+      name: X-Forwarded-For
+      in: header
+      required: false
+      description: Client IP address (set automatically by API Gateway)
+      schema:
+        type: string
+
+    UserAgent:
+      name: User-Agent
+      in: header
+      required: false
+      description: Client user-agent string
+      schema:
+        type: string
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return (1â€“100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Pagination cursor returned in a previous response (`nextCursor`)
+      schema:
+        type: string
+
+  # â”€â”€ Enumerations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  schemas:
+
+    RequestStatus:
+      type: string
+      description: Lifecycle status of a rescue request
+      enum:
+        - SUBMITTED
+        - TRIAGED
+        - ASSIGNED
+        - IN_PROGRESS
+        - RESOLVED
+        - CANCELLED
+      example: SUBMITTED
+
+    RequestType:
+      type: string
+      description: Type of emergency
+      enum:
+        - FLOOD
+        - FIRE
+        - EARTHQUAKE
+        - LANDSLIDE
+        - STORM
+        - MEDICAL
+        - EVACUATION
+        - SUPPLY
+        - OTHER
+      example: FLOOD
+
+    UpdateType:
+      type: string
+      description: Category of a citizen update
+      enum:
+        - NOTE
+        - LOCATION_DETAILS
+        - PEOPLE_COUNT
+        - SPECIAL_NEEDS
+        - CONTACT_INFO
+      example: NOTE
+
+    SourceChannel:
+      type: string
+      description: Channel through which the request was submitted
+      enum:
+        - WEB
+        - MOBILE
+        - LINE
+        - PHONE
+        - WALK_IN
+        - OTHER
+      example: MOBILE
+
+    IdempotencyStatus:
+      type: string
+      description: Processing status of an idempotency record
+      enum:
+        - IN_PROGRESS
+        - COMPLETED
+        - FAILED
+      example: COMPLETED
+
+    # â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    CreateRescueRequestBody:
+      type: object
+      required:
+        - incidentId
+        - requestType
+        - description
+        - peopleCount
+        - latitude
+        - longitude
+        - contactName
+        - contactPhone
+        - sourceChannel
+      properties:
+        incidentId:
+          type: string
+          description: Identifier of the disaster incident this request belongs to
+          example: "INC-2024-001"
+        requestType:
+          $ref: '#/components/schemas/RequestType'
+        description:
+          type: string
+          description: Free-text description of the emergency situation
+          example: "Water level rising rapidly, 5 people trapped on second floor"
+        peopleCount:
+          type: integer
+          minimum: 1
+          description: Number of people who need assistance
+          example: 5
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          description: GPS latitude of the incident location (decimal degrees)
+          example: 13.7563
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          description: GPS longitude of the incident location (decimal degrees)
+          example: 100.5018
+        contactName:
+          type: string
+          description: Full name of the primary contact person
+          example: "Somchai Jaidee"
+        contactPhone:
+          type: string
+          description: Mobile phone number of the contact (10â€“15 digits)
+          example: "0812345678"
+        sourceChannel:
+          $ref: '#/components/schemas/SourceChannel'
+        specialNeeds:
+          type: string
+          nullable: true
+          description: Any special requirements (e.g. medical equipment, wheelchair)
+          example: "Elderly person, needs wheelchair"
+        locationDetails:
+          type: string
+          nullable: true
+          description: Additional free-text location description
+          example: "Yellow house next to the big banyan tree"
+        province:
+          type: string
+          nullable: true
+          description: Province / region
+          example: "Bangkok"
+        district:
+          type: string
+          nullable: true
+          description: District
+          example: "Bang Rak"
+        subdistrict:
+          type: string
+          nullable: true
+          description: Sub-district
+          example: "Bang Rak"
+        addressLine:
+          type: string
+          nullable: true
+          description: Street address
+          example: "123 Silom Road"
+
+    CitizenTrackingLookupBody:
+      type: object
+      required:
+        - contactPhone
+        - trackingCode
+      properties:
+        contactPhone:
+          type: string
+          description: Mobile phone number used when submitting the request
+          example: "0812345678"
+        trackingCode:
+          type: string
+          description: Tracking code received after submission
+          pattern: "^[0-9]{6}$"
+          example: "123456"
+
+    CreateCitizenUpdateBody:
+      type: object
+      required:
+        - updateType
+        - updatePayload
+      properties:
+        updateType:
+          $ref: '#/components/schemas/UpdateType'
+        updatePayload:
+          type: object
+          description: |
+            Update-specific data. Structure depends on `updateType`:
+
+            | updateType | Example payload |
+            |------------|-----------------|
+            | `NOTE` | `{"note": "rescuers have arrived"}` |
+            | `LOCATION_DETAILS` | `{"locationDetails": "now on the roof"}` |
+            | `PEOPLE_COUNT` | `{"peopleCount": 7}` |
+            | `SPECIAL_NEEDS` | `{"specialNeeds": "person with broken leg"}` |
+            | `CONTACT_INFO` | `{"contactPhone": "0899999999"}` |
+          additionalProperties: true
+          example:
+            peopleCount: 7
+
+    PatchRescueRequestBody:
+      type: object
+      description: |
+        Any combination of the following fields may be provided.
+        At least one field is required.
+
+        Fields **not** allowed: `incidentId`, `status`, `requestId`.
+      properties:
+        description:
+          type: string
+          description: Updated emergency description
+          example: "Updated: water level now at 1.5 m, 7 people trapped"
+        peopleCount:
+          type: integer
+          minimum: 1
+          description: Revised head count
+          example: 7
+        specialNeeds:
+          type: string
+          nullable: true
+          description: Updated special requirements
+          example: "One person has a broken leg"
+        locationDetails:
+          type: string
+          nullable: true
+          description: Revised location description
+          example: "Moved to rooftop"
+        addressLine:
+          type: string
+          nullable: true
+          description: Revised street address
+          example: "123/4 Silom Road"
+
+    AppendStatusEventBody:
+      type: object
+      required:
+        - newStatus
+        - changedBy
+        - changedByRole
+      properties:
+        newStatus:
+          $ref: '#/components/schemas/RequestStatus'
+        changedBy:
+          type: string
+          description: Identifier of the staff member performing the transition
+          example: "staff-001"
+        changedByRole:
+          type: string
+          description: Role of the staff member
+          example: "dispatcher"
+        responderUnitId:
+          type: string
+          nullable: true
+          description: Responding unit identifier (required when `newStatus` is `ASSIGNED`)
+          example: "UNIT-007"
+        reason:
+          type: string
+          nullable: true
+          description: Cancellation reason (required when `newStatus` is `CANCELLED`)
+          example: "Duplicate report"
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+          description: Numerical priority score (higher = more urgent)
+          example: 85.5
+        priorityLevel:
+          type: string
+          nullable: true
+          description: Human-readable priority label
+          example: "HIGH"
+        note:
+          type: string
+          nullable: true
+          description: Operational note stored on the current state
+          example: "Team dispatched, ETA 15 minutes"
+        meta:
+          type: object
+          nullable: true
+          description: Arbitrary additional metadata for the event
+          additionalProperties: true
+
+    CommandBody:
+      type: object
+      description: Common optional fields for state-machine command requests
+      properties:
+        changedBy:
+          type: string
+          description: Identifier of the staff member performing the command
+          default: "staff"
+          example: "dispatcher-01"
+        changedByRole:
+          type: string
+          description: Role of the staff member
+          default: "staff"
+          example: "dispatcher"
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+          description: Numerical priority score (higher = more urgent)
+          example: 75.0
+        priorityLevel:
+          type: string
+          nullable: true
+          description: Human-readable priority label
+          example: "HIGH"
+        note:
+          type: string
+          nullable: true
+          description: Operational note stored on the current state
+          example: "Verified â€” forwarding to field team Alpha"
+        meta:
+          type: object
+          nullable: true
+          description: Arbitrary additional metadata for the event
+          additionalProperties: true
+
+    # â”€â”€ Response Schemas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    CreateRescueRequestResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+          description: Unique ID of the created rescue request
+        trackingCode:
+          type: string
+          description: Short code the citizen can use to look up their request later
+          pattern: "^[0-9]{6}$"
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        submittedAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp of submission (UTC)
+
+    CitizenTrackingLookupResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+          description: ID of the matching rescue request
+        incidentId:
+          type: string
+          description: Incident the request belongs to
+
+    CitizenStatusResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        priorityLevel:
+          type: string
+          nullable: true
+          description: Human-readable priority label
+        assignedUnitId:
+          type: string
+          nullable: true
+          description: ID of the responding unit, if assigned
+        lastUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        stateVersion:
+          type: integer
+          description: Monotonically increasing version of the current state
+
+    CreateCitizenUpdateResponse:
+      type: object
+      properties:
+        updateId:
+          type: string
+          format: uuid
+          description: Unique ID of the created update
+        requestId:
+          type: string
+          format: uuid
+        updateType:
+          $ref: '#/components/schemas/UpdateType'
+        createdAt:
+          type: string
+          format: date-time
+
+    ListCitizenUpdatesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitizenUpdateItem'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass as `cursor` for the next page; `null` when no more pages
+
+    CitizenUpdateItem:
+      type: object
+      properties:
+        updateId:
+          type: string
+          format: uuid
+        requestId:
+          type: string
+          format: uuid
+        updateType:
+          $ref: '#/components/schemas/UpdateType'
+        updatePayload:
+          type: object
+          additionalProperties: true
+        citizenAuthMethod:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    GetRescueRequestResponse:
+      type: object
+      properties:
+        master:
+          $ref: '#/components/schemas/RescueRequestMaster'
+        currentState:
+          $ref: '#/components/schemas/CurrentStateResponse'
+          nullable: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusEventItem'
+          description: Present only when `includeEvents=true`
+        citizenUpdates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitizenUpdateItem'
+          description: Present only when `includeCitizenUpdates=true`
+
+    RescueRequestMaster:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        incidentId:
+          type: string
+        requestType:
+          $ref: '#/components/schemas/RequestType'
+        description:
+          type: string
+        peopleCount:
+          type: integer
+        specialNeeds:
+          type: string
+          nullable: true
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        locationDetails:
+          type: string
+          nullable: true
+        province:
+          type: string
+          nullable: true
+        district:
+          type: string
+          nullable: true
+        subdistrict:
+          type: string
+          nullable: true
+        addressLine:
+          type: string
+          nullable: true
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+          description: Original phone number as entered (un-masked)
+        sourceChannel:
+          $ref: '#/components/schemas/SourceChannel'
+        submittedAt:
+          type: string
+          format: date-time
+        lastCitizenUpdateAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PatchRescueRequestResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        updated:
+          type: array
+          items:
+            type: string
+          description: List of field names that were updated
+          example: ["description", "peopleCount"]
+
+    ListStatusEventsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusEventItem'
+        nextCursor:
+          type: string
+          nullable: true
+
+    StatusEventItem:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        requestId:
+          type: string
+          format: uuid
+        previousStatus:
+          $ref: '#/components/schemas/RequestStatus'
+          nullable: true
+        newStatus:
+          $ref: '#/components/schemas/RequestStatus'
+        changedBy:
+          type: string
+        changedByRole:
+          type: string
+        changeReason:
+          type: string
+          nullable: true
+        meta:
+          type: object
+          nullable: true
+          additionalProperties: true
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+        responderUnitId:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        occurredAt:
+          type: string
+          format: date-time
+
+    StatusTransitionResponse:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          description: ID of the status-change event that was created
+        requestId:
+          type: string
+          format: uuid
+        previousStatus:
+          $ref: '#/components/schemas/RequestStatus'
+          nullable: true
+        newStatus:
+          $ref: '#/components/schemas/RequestStatus'
+        version:
+          type: integer
+          description: New `stateVersion` after the transition
+        occurredAt:
+          type: string
+          format: date-time
+
+    CurrentStateResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        incidentId:
+          type: string
+        lastEventId:
+          type: string
+          format: uuid
+        stateVersion:
+          type: integer
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+        priorityLevel:
+          type: string
+          nullable: true
+        assignedUnitId:
+          type: string
+          nullable: true
+        assignedAt:
+          type: string
+          format: date-time
+          nullable: true
+        latestNote:
+          type: string
+          nullable: true
+        lastUpdatedBy:
+          type: string
+          nullable: true
+        lastUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ListByIncidentResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentRequestSummary'
+        nextCursor:
+          type: string
+          nullable: true
+
+    IncidentRequestSummary:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        incidentId:
+          type: string
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        requestType:
+          $ref: '#/components/schemas/RequestType'
+        contactName:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+
+    IdempotencyRecordResponse:
+      type: object
+      properties:
+        idempotencyKeyHash:
+          type: string
+          description: SHA-256 hash of the original idempotency key
+        operationName:
+          type: string
+          description: Name of the operation that was executed
+        status:
+          $ref: '#/components/schemas/IdempotencyStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        resultResourceId:
+          type: string
+          nullable: true
+          description: ID of the resource that was created or modified
+        responseStatusCode:
+          type: integer
+          nullable: true
+          description: HTTP status of the stored response (present when `includeResponse=true`)
+        responseBody:
+          type: string
+          nullable: true
+          description: JSON body of the stored response (present when `includeResponse=true`)
+        requestFingerprint:
+          type: string
+          nullable: true
+          description: SHA-256 fingerprint of the original request body (present when `includeRequestFingerprint=true`)
+
+    # â”€â”€ Error Schemas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Human-readable error description
+          example: "Input validation failed"
+        traceId:
+          type: string
+          format: uuid
+          description: Unique trace identifier for debugging
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        details:
+          type: array
+          description: Field-level validation details (may be empty)
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                description: Name of the field with the issue
+                example: "contactPhone"
+              issue:
+                type: string
+                description: Description of the problem
+                example: "must be a valid phone number (10-15 digits)"
+
+  # â”€â”€ Reusable Responses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  responses:
+
+    NotFound:
+      description: The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Request 550e8400-e29b-41d4-a716-446655440000 not found"
+            traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            details: []
+
+    Conflict:
+      description: |
+        The request conflicts with the current state of the resource.
+
+        Common causes:
+        - Invalid state-machine transition
+        - Version mismatch (`If-Match` header)
+        - Duplicate request detected within the dedup window
+        - Idempotency key reused with a different payload
+        - Request is already in a terminal state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Invalid transition from SUBMITTED to IN_PROGRESS"
+            traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            details: []
+
+    UnprocessableEntity:
+      description: Input validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Input validation failed"
+            traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            details:
+              - field: "contactPhone"
+                issue: "must be a valid phone number (10-15 digits)"
+              - field: "latitude"
+                issue: "must be between -90 and 90"
+
+    Forbidden:
+      description: The phone number and tracking code combination is not valid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Invalid phone number or tracking code"
+            traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            details: []
+
+    InternalServerError:
+      description: An unexpected server error occurred
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Internal server error"
+            traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            details: []
