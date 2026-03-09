@@ -1,0 +1,18 @@
+version = 0.1
+
+[default.build.parameters]
+use_container = false
+
+[default.deploy.parameters]
+stack_name = "rescue-request-service-dev"
+region = "ap-southeast-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=dev"
+
+[prod.deploy.parameters]
+stack_name = "rescue-request-service-prod"
+region = "ap-southeast-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=prod"
