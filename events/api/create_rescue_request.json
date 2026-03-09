@@ -1,0 +1,10 @@
+{
+  "httpMethod": "POST",
+  "path": "/v1/rescue-requests",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"incidentId\": \"incident-flood-2024-001\", \"requestType\": \"FLOOD\", \"description\": \"Water level rising rapidly\", \"peopleCount\": 5, \"latitude\": 13.7563, \"longitude\": 100.5018, \"contactName\": \"Test User\", \"contactPhone\": \"0812345678\", \"sourceChannel\": \"WEB\"}",
+  "pathParameters": null,
+  "queryStringParameters": null
+}

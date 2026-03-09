@@ -1,0 +1,10 @@
+{
+  "httpMethod": "POST",
+  "path": "/v1/citizen/tracking/lookup",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"contactPhone\": \"0812345678\", \"trackingCode\": \"123456\"}",
+  "pathParameters": null,
+  "queryStringParameters": null
+}

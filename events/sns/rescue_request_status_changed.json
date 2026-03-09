@@ -1,0 +1,20 @@
+{
+  "header": {
+    "messageId": "550e8400-e29b-41d4-a716-446655440001",
+    "eventType": "rescue-request.status-changed",
+    "schemaVersion": "1.0",
+    "producer": "rescue-request-service",
+    "occurredAt": "2024-01-01T00:00:00+00:00",
+    "traceId": "trace-002",
+    "correlationId": "corr-002",
+    "partitionKey": "request-001",
+    "contentType": "application/json"
+  },
+  "body": {
+    "requestId": "request-001",
+    "previousStatus": "SUBMITTED",
+    "newStatus": "TRIAGED",
+    "eventId": "event-001",
+    "version": 2
+  }
+}

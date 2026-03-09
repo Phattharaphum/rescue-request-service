@@ -1,0 +1,17 @@
+{
+  "header": {
+    "messageId": "550e8400-e29b-41d4-a716-446655440000",
+    "eventType": "rescue-request.created",
+    "schemaVersion": "1.0",
+    "producer": "rescue-request-service",
+    "occurredAt": "2024-01-01T00:00:00+00:00",
+    "traceId": "trace-001",
+    "correlationId": "corr-001",
+    "partitionKey": "request-001",
+    "contentType": "application/json"
+  },
+  "body": {
+    "requestId": "request-001",
+    "data": {}
+  }
+}

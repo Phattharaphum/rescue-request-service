@@ -1,0 +1,12 @@
+{
+  "httpMethod": "GET",
+  "path": "/v1/rescue-requests/sample-request-001",
+  "headers": {},
+  "body": null,
+  "pathParameters": {
+    "requestId": "sample-request-001"
+  },
+  "queryStringParameters": {
+    "includeEvents": "true"
+  }
+}
