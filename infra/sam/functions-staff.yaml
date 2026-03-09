@@ -1,0 +1,8 @@
+# Staff Lambda Functions
+# - GetRescueRequestFunction
+# - PatchRescueRequestFunction
+# - ListStatusEventsFunction
+# - AppendStatusEventFunction
+# - GetCurrentStateFunction
+# - ListByIncidentFunction
+# - GetIdempotencyRecordFunction

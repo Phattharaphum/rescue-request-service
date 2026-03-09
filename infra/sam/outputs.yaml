@@ -1,0 +1,5 @@
+# CloudFormation Outputs
+# - ApiEndpoint: API Gateway URL
+# - RescueRequestTableName: DynamoDB table name
+# - IdempotencyTableName: Idempotency table name
+# - SnsTopicArn: SNS topic ARN

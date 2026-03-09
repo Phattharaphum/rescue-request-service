@@ -1,0 +1,6 @@
+# Lambda Global Defaults
+# Runtime: python3.11
+# Timeout: 30
+# MemorySize: 256
+# Environment Variables:
+#   STAGE, DYNAMODB_TABLE_NAME, IDEMPOTENCY_TABLE_NAME, SNS_TOPIC_ARN, LOG_LEVEL

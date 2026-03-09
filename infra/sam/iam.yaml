@@ -1,0 +1,5 @@
+# IAM Policies
+# Each function gets least-privilege policies via SAM policy templates:
+# - DynamoDBCrudPolicy for write operations
+# - DynamoDBReadPolicy for read-only operations
+# - SNSPublishMessagePolicy for event publishing

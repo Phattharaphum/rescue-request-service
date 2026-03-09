@@ -1,0 +1,13 @@
+# SNS Topic: rescue-request-events-v1
+#
+# Events published:
+#   - rescue-request.created
+#   - rescue-request.status-changed
+#   - rescue-request.citizen-updated
+#   - rescue-request.cancelled
+#   - rescue-request.resolved
+#
+# Message Attributes:
+#   - eventType (String)
+#   - schemaVersion (String)
+#   - producer (String)

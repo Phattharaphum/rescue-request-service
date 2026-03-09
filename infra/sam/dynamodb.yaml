@@ -1,0 +1,20 @@
+# DynamoDB Table Design
+
+# Table 1: RescueRequestTable
+# Partition Key: PK (String)
+# Sort Key: SK (String)
+# Billing: PAY_PER_REQUEST
+#
+# Item Patterns:
+#   Master:             PK=REQ#{requestId}       SK=META
+#   Current State:      PK=REQ#{requestId}       SK=CURRENT
+#   Status Event:       PK=REQ#{requestId}       SK=EVENT#{version:010d}
+#   Citizen Update:     PK=REQ#{requestId}       SK=UPDATE#{createdAt}#{updateId}
+#   Tracking Lookup:    PK=TRACK#{phoneHash}      SK=CODE#{trackingCodeHash}
+#   Incident Projection: PK=INCIDENT#{incidentId} SK=REQUEST#{submittedAt}#{requestId}
+#   Duplicate Signature: PK=DUP#{signature}       SK=REQUEST#{requestId}
+
+# Table 2: IdempotencyTable
+# Partition Key: idempotencyKeyHash (String)
+# TTL: expiresAt
+# Billing: PAY_PER_REQUEST

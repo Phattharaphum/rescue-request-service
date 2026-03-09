@@ -1,0 +1,393 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Rescue Request Service
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod, local]
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        DYNAMODB_TABLE_NAME: !Ref RescueRequestTable
+        IDEMPOTENCY_TABLE_NAME: !Ref IdempotencyTable
+        SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
+        LOG_LEVEL: INFO
+
+Resources:
+  # DynamoDB Tables
+  RescueRequestTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "RescueRequestTable-${Stage}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  IdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "IdempotencyTable-${Stage}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: idempotencyKeyHash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: idempotencyKeyHash
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # SNS Topic
+  RescueRequestEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "rescue-request-events-v1-${Stage}"
+
+  # API Gateway
+  RescueRequestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      TracingEnabled: true
+
+  # Public Handlers
+  CreateRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.create_rescue_request.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests
+            Method: POST
+
+  CitizenTrackingLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.citizen_tracking_lookup.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/citizen/tracking/lookup
+            Method: POST
+
+  GetCitizenStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.get_citizen_status.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/citizen/rescue-requests/{requestId}/status
+            Method: GET
+
+  CreateCitizenUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.create_citizen_update.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/citizen/rescue-requests/{requestId}/updates
+            Method: POST
+
+  ListCitizenUpdatesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.list_citizen_updates.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/citizen/rescue-requests/{requestId}/updates
+            Method: GET
+
+  # Staff Handlers
+  GetRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_rescue_request.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}
+            Method: GET
+
+  PatchRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.patch_rescue_request.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}
+            Method: PATCH
+
+  ListStatusEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.list_status_events.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/events
+            Method: GET
+
+  AppendStatusEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.append_status_event.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/events
+            Method: POST
+
+  GetCurrentStateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_current_state.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/current
+            Method: GET
+
+  ListByIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.list_by_incident.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/incidents/{incidentId}/rescue-requests
+            Method: GET
+
+  GetIdempotencyRecordFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_idempotency_record.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IdempotencyTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/idempotency-keys/{idempotencyKeyHash}
+            Method: GET
+
+  # Command Handlers
+  TriageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.triage.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}:triage
+            Method: POST
+
+  AssignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.assign.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}:assign
+            Method: POST
+
+  StartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.start.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}:start
+            Method: POST
+
+  ResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.resolve.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}:resolve
+            Method: POST
+
+  CancelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.cancel.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicArn: !Ref RescueRequestEventsTopic
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}:cancel
+            Method: POST
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${RescueRequestApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+  RescueRequestTableName:
+    Description: DynamoDB table name
+    Value: !Ref RescueRequestTable
+  IdempotencyTableName:
+    Description: Idempotency table name
+    Value: !Ref IdempotencyTable
+  SnsTopicArn:
+    Description: SNS topic ARN
+    Value: !Ref RescueRequestEventsTopic

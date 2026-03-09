@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Rescue Request Service - Local Development
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        STAGE: local
+        DYNAMODB_TABLE_NAME: RescueRequestTable
+        IDEMPOTENCY_TABLE_NAME: IdempotencyTable
+        SNS_TOPIC_ARN: ""
+        LOG_LEVEL: DEBUG
+        DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+
+Resources:
+  CreateRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.create_rescue_request.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests
+            Method: POST
+
+  CitizenTrackingLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.citizen_tracking_lookup.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/citizen/tracking/lookup
+            Method: POST
+
+  GetCitizenStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.get_citizen_status.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/citizen/rescue-requests/{requestId}/status
+            Method: GET
+
+  CreateCitizenUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.create_citizen_update.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/citizen/rescue-requests/{requestId}/updates
+            Method: POST
+
+  ListCitizenUpdatesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.list_citizen_updates.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/citizen/rescue-requests/{requestId}/updates
+            Method: GET
+
+  GetRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_rescue_request.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}
+            Method: GET
+
+  PatchRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.patch_rescue_request.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}
+            Method: PATCH
+
+  ListStatusEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.list_status_events.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}/events
+            Method: GET
+
+  AppendStatusEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.append_status_event.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}/events
+            Method: POST
+
+  GetCurrentStateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_current_state.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}/current
+            Method: GET
+
+  ListByIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.list_by_incident.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/incidents/{incidentId}/rescue-requests
+            Method: GET
+
+  GetIdempotencyRecordFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_idempotency_record.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/idempotency-keys/{idempotencyKeyHash}
+            Method: GET
+
+  TriageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.triage.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}:triage
+            Method: POST
+
+  AssignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.assign.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}:assign
+            Method: POST
+
+  StartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.start.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}:start
+            Method: POST
+
+  ResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.resolve.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}:resolve
+            Method: POST
+
+  CancelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.cancel.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/rescue-requests/{requestId}:cancel
+            Method: POST
