@@ -146,7 +146,8 @@ def tracking_lookup(phone_hash: str, tracking_code_hash: str) -> dict | None:
     return _convert_decimals(item) if item else None
 
 
-def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = None) -> dict:
+def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = None,
+                     status: str | None = None) -> dict:
     table = _get_table()
     kwargs: dict[str, Any] = {
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk_prefix)",
@@ -154,6 +155,10 @@ def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = Non
         "Limit": limit,
         "ScanIndexForward": False,
     }
+    if status:
+        kwargs["FilterExpression"] = "#s = :status"
+        kwargs["ExpressionAttributeNames"] = {"#s": "status"}
+        kwargs["ExpressionAttributeValues"][":status"] = status
     if cursor:
         decoded = decode_cursor(cursor)
         if decoded:
