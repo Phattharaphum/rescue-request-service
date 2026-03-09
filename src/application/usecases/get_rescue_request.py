@@ -1,0 +1,38 @@
+from src.adapters.persistence.rescue_request_repository import (
+    get_current_state,
+    get_master,
+    list_citizen_updates,
+    list_events,
+)
+from src.shared.errors import NotFoundError
+from src.shared.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def execute(request_id: str, include_events: bool = False, include_citizen_updates: bool = False) -> dict:
+    master = get_master(request_id)
+    if not master:
+        raise NotFoundError(f"Request {request_id} not found")
+
+    current = get_current_state(request_id)
+
+    result = {
+        "master": _clean_item(master),
+        "currentState": _clean_item(current) if current else None,
+    }
+
+    if include_events:
+        events_result = list_events(request_id, limit=100)
+        result["events"] = [_clean_item(e) for e in events_result["items"]]
+
+    if include_citizen_updates:
+        updates_result = list_citizen_updates(request_id, limit=100)
+        result["citizenUpdates"] = [_clean_item(u) for u in updates_result["items"]]
+
+    return result
+
+
+def _clean_item(item: dict) -> dict:
+    exclude_keys = {"PK", "SK", "itemType"}
+    return {k: v for k, v in item.items() if k not in exclude_keys}
