@@ -1,0 +1,14 @@
+[
+  {
+    "IndexName": "DuplicateSignatureIndex",
+    "KeySchema": [
+      {
+        "AttributeName": "duplicateSignature",
+        "KeyType": "HASH"
+      }
+    ],
+    "Projection": {
+      "ProjectionType": "ALL"
+    }
+  }
+]
