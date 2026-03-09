@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 def _get_sns_client():
     kwargs = {"region_name": AWS_REGION}
     if STAGE == "local" and DYNAMODB_ENDPOINT:
-        kwargs["endpoint_url"] = DYNAMODB_ENDPOINT.replace("8000", "4566")
+        kwargs["endpoint_url"] = DYNAMODB_ENDPOINT
     return boto3.client("sns", **kwargs)
 
 
