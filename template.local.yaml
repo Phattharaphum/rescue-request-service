@@ -170,7 +170,7 @@ Resources:
         Api:
           Type: Api
           Properties:
-            Path: /v1/rescue-requests/{requestId}:triage
+            Path: /v1/rescue-requests/{requestId}/triage
             Method: POST
 
   AssignFunction:
@@ -182,7 +182,7 @@ Resources:
         Api:
           Type: Api
           Properties:
-            Path: /v1/rescue-requests/{requestId}:assign
+            Path: /v1/rescue-requests/{requestId}/assign
             Method: POST
 
   StartFunction:
@@ -194,7 +194,7 @@ Resources:
         Api:
           Type: Api
           Properties:
-            Path: /v1/rescue-requests/{requestId}:start
+            Path: /v1/rescue-requests/{requestId}/start
             Method: POST
 
   ResolveFunction:
@@ -206,7 +206,7 @@ Resources:
         Api:
           Type: Api
           Properties:
-            Path: /v1/rescue-requests/{requestId}:resolve
+            Path: /v1/rescue-requests/{requestId}/resolve
             Method: POST
 
   CancelFunction:
@@ -218,5 +218,6 @@ Resources:
         Api:
           Type: Api
           Properties:
-            Path: /v1/rescue-requests/{requestId}:cancel
+            Path: /v1/rescue-requests/{requestId}/cancel
             Method: POST
+

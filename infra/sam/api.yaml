@@ -19,8 +19,8 @@
 #   GET   /v1/idempotency-keys/{idempotencyKeyHash} - GetIdempotencyRecord
 
 # Command endpoints:
-#   POST /v1/rescue-requests/{requestId}:triage - Triage
-#   POST /v1/rescue-requests/{requestId}:assign - Assign
-#   POST /v1/rescue-requests/{requestId}:start - Start
-#   POST /v1/rescue-requests/{requestId}:resolve - Resolve
-#   POST /v1/rescue-requests/{requestId}:cancel - Cancel
+#   POST /v1/rescue-requests/{requestId}/triage - Triage
+#   POST /v1/rescue-requests/{requestId}/assign - Assign
+#   POST /v1/rescue-requests/{requestId}/start - Start
+#   POST /v1/rescue-requests/{requestId}/resolve - Resolve
+#   POST /v1/rescue-requests/{requestId}/cancel - Cancel

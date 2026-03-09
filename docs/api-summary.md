@@ -28,11 +28,11 @@
 
 | Method | Path | Transition | Description |
 |--------|------|------------|-------------|
-| POST | /v1/rescue-requests/{requestId}:triage | SUBMITTED -> TRIAGED | Triage request |
-| POST | /v1/rescue-requests/{requestId}:assign | TRIAGED -> ASSIGNED | Assign responder unit |
-| POST | /v1/rescue-requests/{requestId}:start | ASSIGNED -> IN_PROGRESS | Start rescue operation |
-| POST | /v1/rescue-requests/{requestId}:resolve | IN_PROGRESS -> RESOLVED | Resolve request |
-| POST | /v1/rescue-requests/{requestId}:cancel | * -> CANCELLED | Cancel request |
+| POST | /v1/rescue-requests/{requestId}/triage | SUBMITTED -> TRIAGED | Triage request |
+| POST | /v1/rescue-requests/{requestId}/assign | TRIAGED -> ASSIGNED | Assign responder unit |
+| POST | /v1/rescue-requests/{requestId}/start | ASSIGNED -> IN_PROGRESS | Start rescue operation |
+| POST | /v1/rescue-requests/{requestId}/resolve | IN_PROGRESS -> RESOLVED | Resolve request |
+| POST | /v1/rescue-requests/{requestId}/cancel | * -> CANCELLED | Cancel request |
 
 ## State Machine
 

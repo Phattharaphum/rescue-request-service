@@ -79,7 +79,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
@@ -131,7 +131,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
@@ -184,7 +184,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
@@ -220,7 +220,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
@@ -289,13 +289,13 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
           Properties:
             RestApiId: !Ref RescueRequestApi
-            Path: /v1/rescue-requests/{requestId}:triage
+            Path: /v1/rescue-requests/{requestId}/triage
             Method: POST
 
   AssignFunction:
@@ -309,13 +309,13 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
           Properties:
             RestApiId: !Ref RescueRequestApi
-            Path: /v1/rescue-requests/{requestId}:assign
+            Path: /v1/rescue-requests/{requestId}/assign
             Method: POST
 
   StartFunction:
@@ -329,13 +329,13 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
           Properties:
             RestApiId: !Ref RescueRequestApi
-            Path: /v1/rescue-requests/{requestId}:start
+            Path: /v1/rescue-requests/{requestId}/start
             Method: POST
 
   ResolveFunction:
@@ -349,13 +349,13 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
           Properties:
             RestApiId: !Ref RescueRequestApi
-            Path: /v1/rescue-requests/{requestId}:resolve
+            Path: /v1/rescue-requests/{requestId}/resolve
             Method: POST
 
   CancelFunction:
@@ -369,13 +369,13 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
         - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         Api:
           Type: Api
           Properties:
             RestApiId: !Ref RescueRequestApi
-            Path: /v1/rescue-requests/{requestId}:cancel
+            Path: /v1/rescue-requests/{requestId}/cancel
             Method: POST
 
 Outputs:
@@ -391,3 +391,5 @@ Outputs:
   SnsTopicArn:
     Description: SNS topic ARN
     Value: !Ref RescueRequestEventsTopic
+
+

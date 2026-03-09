@@ -1,155 +1,179 @@
-# 🛟 Rescue Request Service
+﻿# Rescue Request Service
 
 Backend service for disaster rescue request management built with Python, AWS Lambda, DynamoDB, and SNS.
 
-## 📌 Overview
+## Overview
 
-**Rescue Request Service** is the central hub for receiving and managing rescue requests during disasters. It handles request intake, tracking code issuance, status management through a defined state machine, and publishes domain events for downstream services.
+Rescue Request Service receives rescue requests, manages state transitions, stores data in DynamoDB, and publishes domain events via SNS.
 
-### Architecture
-- **AWS API Gateway** - REST API (synchronous)
-- **AWS Lambda** - Business logic
-- **Amazon DynamoDB** - Persistence (single-table design)
-- **Amazon SNS** - Async domain events
-- **AWS SAM / CloudFormation** - Infrastructure as Code
+## Architecture
 
-## 🚀 Quick Start
+- AWS API Gateway (REST API)
+- AWS Lambda (business logic)
+- Amazon DynamoDB (single-table design)
+- Amazon SNS (async domain events)
+- AWS SAM / CloudFormation (IaC)
 
-### Prerequisites
+## Prerequisites
+
 - Python 3.11+
-- Docker & Docker Compose
-- AWS SAM CLI
+- Docker + Docker Compose
 - AWS CLI
+- AWS SAM CLI
 
-### Install Dependencies
+## Install
+
+### bash
 ```bash
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-### Run Unit Tests
-```bash
-make test-unit
-# or
-python -m pytest tests/unit/ -v
+### PowerShell
+```powershell
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-### Local Development
+## Local Development
+
+### 1) Start local dependencies
+
+### bash
 ```bash
-# Start DynamoDB Local
 make local-db-start
+```
 
-# Start API (requires SAM CLI)
-sam local start-api --template-file template.local.yaml --docker-network rescue-net
+### PowerShell
+```powershell
+make local-db-start
+```
 
-# Stop
+This starts `dynamodb-local` on `http://localhost:8000` and creates required tables.
+
+### 2) Start API
+
+### bash
+```bash
+sam local start-api --template-file template.local.yaml --docker-network rescue-net --env-vars .env.json
+```
+
+### PowerShell
+```powershell
+sam local start-api --template-file template.local.yaml --docker-network rescue-net --env-vars .env.json
+```
+
+### 3) Stop local dependencies
+
+### bash
+```bash
 make local-stop
 ```
 
-### Deploy
-```bash
-# Dev
-make deploy-dev
-
-# Prod
-make deploy-prod
+### PowerShell
+```powershell
+make local-stop
 ```
 
-## 📋 API Endpoints (17 total)
+## Tests
 
-### Public (Citizens)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/rescue-requests` | Create rescue request |
-| POST | `/v1/citizen/tracking/lookup` | Lookup by phone + tracking code |
-| GET | `/v1/citizen/rescue-requests/{requestId}/status` | Get status |
-| POST | `/v1/citizen/rescue-requests/{requestId}/updates` | Submit update |
-| GET | `/v1/citizen/rescue-requests/{requestId}/updates` | List updates |
-
-### Staff
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/v1/rescue-requests/{requestId}` | Get request details |
-| PATCH | `/v1/rescue-requests/{requestId}` | Patch request |
-| GET | `/v1/rescue-requests/{requestId}/events` | List status events |
-| POST | `/v1/rescue-requests/{requestId}/events` | Append status event |
-| GET | `/v1/rescue-requests/{requestId}/current` | Get current state |
-| GET | `/v1/incidents/{incidentId}/rescue-requests` | List by incident |
-| GET | `/v1/idempotency-keys/{idempotencyKeyHash}` | Get idempotency record |
-
-### Commands (State Machine)
-| Method | Path | Transition |
-|--------|------|------------|
-| POST | `/v1/rescue-requests/{requestId}:triage` | SUBMITTED → TRIAGED |
-| POST | `/v1/rescue-requests/{requestId}:assign` | TRIAGED → ASSIGNED |
-| POST | `/v1/rescue-requests/{requestId}:start` | ASSIGNED → IN_PROGRESS |
-| POST | `/v1/rescue-requests/{requestId}:resolve` | IN_PROGRESS → RESOLVED |
-| POST | `/v1/rescue-requests/{requestId}:cancel` | * → CANCELLED |
-
-## 🔄 State Machine
-
-```
-SUBMITTED → TRIAGED → ASSIGNED → IN_PROGRESS → RESOLVED
-    |           |          |           |
-    └───────────┴──────────┴───────────┴──→ CANCELLED
-```
-
-- **ASSIGNED** requires `responderUnitId`
-- **CANCELLED** requires `reason`
-- **RESOLVED** and **CANCELLED** are terminal states
-
-## 🔑 Idempotency
-
-- Use `X-Idempotency-Key` header (UUID) for command endpoints
-- Same key + same payload → replay original response
-- Same key + different payload → 409 Conflict
-- TTL: 24 hours
-
-## 📡 Async Events (SNS)
-
-| Event | Trigger |
-|-------|---------|
-| `rescue-request.created` | New request |
-| `rescue-request.status-changed` | Status transition |
-| `rescue-request.citizen-updated` | Citizen update |
-| `rescue-request.cancelled` | Request cancelled |
-| `rescue-request.resolved` | Request resolved |
-
-## 🏗 Project Structure
-
-```
-src/
-├── handlers/          # Lambda handlers (thin)
-│   ├── public/        # Citizen-facing
-│   ├── staff/         # Staff-facing
-│   └── commands/      # State machine commands
-├── application/
-│   ├── usecases/      # One operation per file
-│   └── services/      # Idempotency, duplicate detection, transitions
-├── domain/
-│   ├── entities/      # Data models
-│   ├── enums/         # Status, types
-│   ├── rules/         # Business rules
-│   └── events/        # Domain events
-├── adapters/
-│   ├── persistence/   # DynamoDB repositories
-│   ├── messaging/     # SNS publisher
-│   ├── auth/          # Auth stub (prepared for future)
-│   └── utils/         # Phone normalizer, hashing, geohash
-└── shared/            # Config, errors, response, validators
-```
-
-## 🧪 Testing
+### Unit tests
 
 ```bash
-# Unit tests (no external deps)
 make test-unit
+```
 
-# Integration tests (requires DynamoDB Local)
-make local-db-start
+### Integration tests
+
+```bash
 make test-integration
 ```
 
-## 🛠 Developer Info
-- **Author:** Phattharaphum Kingchai
-- **Student ID:** 6609612160
+## API Endpoints
+
+### Public
+
+- `POST /v1/rescue-requests`
+- `POST /v1/citizen/tracking/lookup`
+- `GET /v1/citizen/rescue-requests/{requestId}/status`
+- `POST /v1/citizen/rescue-requests/{requestId}/updates`
+- `GET /v1/citizen/rescue-requests/{requestId}/updates`
+
+### Staff
+
+- `GET /v1/rescue-requests/{requestId}`
+- `PATCH /v1/rescue-requests/{requestId}`
+- `GET /v1/rescue-requests/{requestId}/events`
+- `POST /v1/rescue-requests/{requestId}/events`
+- `GET /v1/rescue-requests/{requestId}/current`
+- `GET /v1/incidents/{incidentId}/rescue-requests`
+- `GET /v1/idempotency-keys/{idempotencyKeyHash}`
+
+### Commands
+
+- `POST /v1/rescue-requests/{requestId}/triage`
+- `POST /v1/rescue-requests/{requestId}/assign`
+- `POST /v1/rescue-requests/{requestId}/start`
+- `POST /v1/rescue-requests/{requestId}/resolve`
+- `POST /v1/rescue-requests/{requestId}/cancel`
+
+## Deploy via CloudFormation Console
+
+This project uses SAM template, so deploy flow is: `build` -> `package` -> upload `packaged.yaml` to CloudFormation.
+
+### 1) Build artifacts
+
+### bash
+```bash
+sam build --template-file template.yaml --use-container
+```
+
+### PowerShell
+```powershell
+sam build --template-file template.yaml --use-container
+```
+
+### 2) Package artifacts to S3
+
+Use **bucket name** only (not ARN).
+
+### bash
+```bash
+sam package \
+  --template-file .aws-sam/build/template.yaml \
+  --s3-bucket <your-artifact-bucket-name> \
+  --output-template-file packaged.yaml \
+  --region ap-southeast-2
+```
+
+### PowerShell
+```powershell
+sam package `
+  --template-file .aws-sam/build/template.yaml `
+  --s3-bucket <your-artifact-bucket-name> `
+  --output-template-file packaged.yaml `
+  --region ap-southeast-2
+```
+
+### 3) Create/Update stack in CloudFormation console
+
+1. Open CloudFormation Console
+2. Click `Create stack` (or `Update stack`)
+3. Choose `Upload a template file`
+4. Upload `packaged.yaml`
+5. Set parameter `Stage` (`dev` or `prod`)
+6. Acknowledge IAM capability when prompted
+7. Deploy stack
+
+### 4) Verify outputs
+
+After stack is `CREATE_COMPLETE` / `UPDATE_COMPLETE`, check outputs:
+- `ApiEndpoint`
+- `RescueRequestTableName`
+- `IdempotencyTableName`
+- `SnsTopicArn`
+
+## Notes
+
+- API Gateway REST API does not support command paths like `{requestId}:assign`; use `{requestId}/assign` format.
+- If `sam package` shows `File with same data already exists ... skipping upload`, that is normal.

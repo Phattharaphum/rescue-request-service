@@ -1,0 +1,490 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Rescue Request Service
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+    - dev
+    - prod
+    - local
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        STAGE:
+          Ref: Stage
+        DYNAMODB_TABLE_NAME:
+          Ref: RescueRequestTable
+        IDEMPOTENCY_TABLE_NAME:
+          Ref: IdempotencyTable
+        SNS_TOPIC_ARN:
+          Ref: RescueRequestEventsTopic
+        LOG_LEVEL: INFO
+Resources:
+  RescueRequestTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: RescueRequestTable-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+    Metadata:
+      SamResourceId: RescueRequestTable
+  IdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: IdempotencyTable-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: idempotencyKeyHash
+        AttributeType: S
+      KeySchema:
+      - AttributeName: idempotencyKeyHash
+        KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+    Metadata:
+      SamResourceId: IdempotencyTable
+  RescueRequestEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: rescue-request-events-v1-${Stage}
+    Metadata:
+      SamResourceId: RescueRequestEventsTopic
+  RescueRequestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName:
+        Ref: Stage
+      TracingEnabled: true
+    Metadata:
+      SamResourceId: RescueRequestApi
+  CreateRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.create_rescue_request.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests
+            Method: POST
+    Metadata:
+      SamResourceId: CreateRescueRequestFunction
+  CitizenTrackingLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.citizen_tracking_lookup.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/citizen/tracking/lookup
+            Method: POST
+    Metadata:
+      SamResourceId: CitizenTrackingLookupFunction
+  GetCitizenStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.get_citizen_status.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/citizen/rescue-requests/{requestId}/status
+            Method: GET
+    Metadata:
+      SamResourceId: GetCitizenStatusFunction
+  CreateCitizenUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.create_citizen_update.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/citizen/rescue-requests/{requestId}/updates
+            Method: POST
+    Metadata:
+      SamResourceId: CreateCitizenUpdateFunction
+  ListCitizenUpdatesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.list_citizen_updates.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/citizen/rescue-requests/{requestId}/updates
+            Method: GET
+    Metadata:
+      SamResourceId: ListCitizenUpdatesFunction
+  GetRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_rescue_request.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}
+            Method: GET
+    Metadata:
+      SamResourceId: GetRescueRequestFunction
+  PatchRescueRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.patch_rescue_request.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}
+            Method: PATCH
+    Metadata:
+      SamResourceId: PatchRescueRequestFunction
+  ListStatusEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.list_status_events.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/events
+            Method: GET
+    Metadata:
+      SamResourceId: ListStatusEventsFunction
+  AppendStatusEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.append_status_event.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/events
+            Method: POST
+    Metadata:
+      SamResourceId: AppendStatusEventFunction
+  GetCurrentStateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_current_state.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/current
+            Method: GET
+    Metadata:
+      SamResourceId: GetCurrentStateFunction
+  ListByIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.list_by_incident.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/incidents/{incidentId}/rescue-requests
+            Method: GET
+    Metadata:
+      SamResourceId: ListByIncidentFunction
+  GetIdempotencyRecordFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.get_idempotency_record.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/idempotency-keys/{idempotencyKeyHash}
+            Method: GET
+    Metadata:
+      SamResourceId: GetIdempotencyRecordFunction
+  TriageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.triage.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/triage
+            Method: POST
+    Metadata:
+      SamResourceId: TriageFunction
+  AssignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.assign.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/assign
+            Method: POST
+    Metadata:
+      SamResourceId: AssignFunction
+  StartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.start.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/start
+            Method: POST
+    Metadata:
+      SamResourceId: StartFunction
+  ResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.resolve.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/resolve
+            Method: POST
+    Metadata:
+      SamResourceId: ResolveFunction
+  CancelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.commands.cancel.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/8e68b232476b80a29b5aa7d34c64c386
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/cancel
+            Method: POST
+    Metadata:
+      SamResourceId: CancelFunction
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value:
+      Fn::Sub: https://${RescueRequestApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+  RescueRequestTableName:
+    Description: DynamoDB table name
+    Value:
+      Ref: RescueRequestTable
+  IdempotencyTableName:
+    Description: Idempotency table name
+    Value:
+      Ref: IdempotencyTable
+  SnsTopicArn:
+    Description: SNS topic ARN
+    Value:
+      Ref: RescueRequestEventsTopic
