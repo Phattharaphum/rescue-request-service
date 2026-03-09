@@ -16,6 +16,9 @@ from src.shared.logger import get_logger
 logger = get_logger(__name__)
 
 
+_MAX_RESERVE_RETRIES = 3
+
+
 def check_and_reserve(
     idempotency_key: str,
     operation_name: str,
@@ -23,6 +26,7 @@ def check_and_reserve(
     client_id: str | None = None,
     request_ip: str | None = None,
     user_agent: str | None = None,
+    _retry_count: int = 0,
 ) -> dict | None:
     key_hash = hash_idempotency_key(idempotency_key)
     fingerprint = compute_request_fingerprint(request_body)
@@ -63,7 +67,12 @@ def check_and_reserve(
     }
     reserved = reserve_idempotency_key(record)
     if not reserved:
-        return check_and_reserve(idempotency_key, operation_name, request_body, client_id, request_ip, user_agent)
+        if _retry_count >= _MAX_RESERVE_RETRIES:
+            raise ConflictError("Unable to reserve idempotency key after multiple attempts")
+        return check_and_reserve(
+            idempotency_key, operation_name, request_body, client_id, request_ip, user_agent,
+            _retry_count=_retry_count + 1,
+        )
     return None
 
 
