@@ -28,11 +28,11 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [GET /incidents/{incidentId}/rescue-requests](#76-get-incidentsincidentidrescue-requests)
    - [GET /idempotency-keys/{idempotencyKeyHash}](#77-get-idempotency-keysidempotencykeyhash)
 8. [Command Endpoints (State Machine)](#8-command-endpoints-state-machine)
-   - [POST /rescue-requests/{requestId}:triage](#81-post-rescue-requestsrequestidtriage)
-   - [POST /rescue-requests/{requestId}:assign](#82-post-rescue-requestsrequestidassign)
-   - [POST /rescue-requests/{requestId}:start](#83-post-rescue-requestsrequestidstart)
-   - [POST /rescue-requests/{requestId}:resolve](#84-post-rescue-requestsrequestidresolve)
-   - [POST /rescue-requests/{requestId}:cancel](#85-post-rescue-requestsrequestidcancel)
+   - [POST /rescue-requests/{requestId}/triage](#81-post-rescue-requestsrequestidtriage)
+   - [POST /rescue-requests/{requestId}/assign](#82-post-rescue-requestsrequestidassign)
+   - [POST /rescue-requests/{requestId}/start](#83-post-rescue-requestsrequestidstart)
+   - [POST /rescue-requests/{requestId}/resolve](#84-post-rescue-requestsrequestidresolve)
+   - [POST /rescue-requests/{requestId}/cancel](#85-post-rescue-requestsrequestidcancel)
 9. [State Machine](#9-state-machine)
 10. [Async Events (SNS)](#10-async-events-sns)
 11. [Idempotency](#11-idempotency)
@@ -158,7 +158,7 @@ together with their phone number, to look up the status of their request.
 
 **Duplicate detection** — a `409 Conflict` is returned if a request with the same
 incident, phone, request type, approximate location, and submission time (within a
-15-minute window) already exists and no idempotency key was supplied.
+5-minute window) already exists and no idempotency key was supplied.
 
 #### Request
 
@@ -207,7 +207,7 @@ incident, phone, request type, approximate location, and submission time (within
 ```json
 {
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
-  "trackingCode": "ABCD-1234",
+  "trackingCode": "123456",
   "status": "SUBMITTED",
   "submittedAt": "2024-01-15T10:30:00.000000+00:00"
 }
@@ -233,7 +233,7 @@ Looks up a rescue request using the citizen's phone number and tracking code.
 ```json
 {
   "contactPhone": "0812345678",
-  "trackingCode": "ABCD-1234"
+  "trackingCode": "123456"
 }
 ```
 
@@ -673,7 +673,7 @@ and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
 
 ---
 
-### 8.1 POST /rescue-requests/{requestId}:triage
+### 8.1 POST /rescue-requests/{requestId}/triage
 
 `SUBMITTED → TRIAGED`
 
@@ -692,7 +692,7 @@ and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
 
 ---
 
-### 8.2 POST /rescue-requests/{requestId}:assign
+### 8.2 POST /rescue-requests/{requestId}/assign
 
 `TRIAGED → ASSIGNED`
 
@@ -714,7 +714,7 @@ and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
 
 ---
 
-### 8.3 POST /rescue-requests/{requestId}:start
+### 8.3 POST /rescue-requests/{requestId}/start
 
 `ASSIGNED → IN_PROGRESS`
 
@@ -726,7 +726,7 @@ Same optional fields as [triage](#81-post-rescue-requestsrequestidtriage).
 
 ---
 
-### 8.4 POST /rescue-requests/{requestId}:resolve
+### 8.4 POST /rescue-requests/{requestId}/resolve
 
 `IN_PROGRESS → RESOLVED` *(terminal)*
 
@@ -740,7 +740,7 @@ Same optional fields as [triage](#81-post-rescue-requestsrequestidtriage).
 
 ---
 
-### 8.5 POST /rescue-requests/{requestId}:cancel
+### 8.5 POST /rescue-requests/{requestId}/cancel
 
 `* → CANCELLED` *(terminal — from any non-terminal state)*
 
@@ -764,23 +764,23 @@ Publishes `rescue-request.status-changed` and `rescue-request.cancelled` SNS eve
 ## 9. State Machine
 
 ```
-SUBMITTED ──:triage──▶ TRIAGED ──:assign──▶ ASSIGNED ──:start──▶ IN_PROGRESS ──:resolve──▶ RESOLVED
+SUBMITTED ──/triage──▶ TRIAGED ──/assign──▶ ASSIGNED ──/start──▶ IN_PROGRESS ──/resolve──▶ RESOLVED
     │                     │                     │                      │
-    └──────────────────────┴─────────────────────┴──────────────────────┴──:cancel──▶ CANCELLED
+    └──────────────────────┴─────────────────────┴──────────────────────┴──/cancel──▶ CANCELLED
 ```
 
 ### Allowed Transitions
 
 | From | To | Command |
 |------|----|---------|
-| `SUBMITTED` | `TRIAGED` | `:triage` |
-| `TRIAGED` | `ASSIGNED` | `:assign` |
-| `ASSIGNED` | `IN_PROGRESS` | `:start` |
-| `IN_PROGRESS` | `RESOLVED` | `:resolve` |
-| `SUBMITTED` | `CANCELLED` | `:cancel` |
-| `TRIAGED` | `CANCELLED` | `:cancel` |
-| `ASSIGNED` | `CANCELLED` | `:cancel` |
-| `IN_PROGRESS` | `CANCELLED` | `:cancel` |
+| `SUBMITTED` | `TRIAGED` | `/triage` |
+| `TRIAGED` | `ASSIGNED` | `/assign` |
+| `ASSIGNED` | `IN_PROGRESS` | `/start` |
+| `IN_PROGRESS` | `RESOLVED` | `/resolve` |
+| `SUBMITTED` | `CANCELLED` | `/cancel` |
+| `TRIAGED` | `CANCELLED` | `/cancel` |
+| `ASSIGNED` | `CANCELLED` | `/cancel` |
+| `IN_PROGRESS` | `CANCELLED` | `/cancel` |
 
 Attempting an invalid transition returns `409 Conflict`.
 Attempting to transition from a terminal state (`RESOLVED` or `CANCELLED`) also returns `409 Conflict`.
@@ -865,11 +865,11 @@ X-Idempotency-Key: f47ac10b-58cc-4372-a567-0e02b2c3d479
 | `POST /citizen/rescue-requests/{requestId}/updates` | `CreateCitizenUpdate` |
 | `PATCH /rescue-requests/{requestId}` | `PatchRescueRequest` |
 | `POST /rescue-requests/{requestId}/events` | `AppendStatusEvent` |
-| `POST /rescue-requests/{requestId}:triage` | `Triage` |
-| `POST /rescue-requests/{requestId}:assign` | `Assign` |
-| `POST /rescue-requests/{requestId}:start` | `Start` |
-| `POST /rescue-requests/{requestId}:resolve` | `Resolve` |
-| `POST /rescue-requests/{requestId}:cancel` | `Cancel` |
+| `POST /rescue-requests/{requestId}/triage` | `Triage` |
+| `POST /rescue-requests/{requestId}/assign` | `Assign` |
+| `POST /rescue-requests/{requestId}/start` | `Start` |
+| `POST /rescue-requests/{requestId}/resolve` | `Resolve` |
+| `POST /rescue-requests/{requestId}/cancel` | `Cancel` |
 
 ### Configuration
 
@@ -890,7 +890,7 @@ recent duplicate using a content-based signature:
 signature = SHA256(incidentId | normalizedPhone | requestType | geohash(lat,lng,precision=7) | timeBucket)
 ```
 
-`timeBucket` divides submissions into **15-minute windows** so that a citizen can submit
+`timeBucket` divides submissions into **5-minute windows** so that a citizen can submit
 a new request for the same situation once the window expires.
 
 If a matching signature is found the service returns `409 Conflict` with the ID of the

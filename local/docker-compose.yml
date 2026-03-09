@@ -5,11 +5,13 @@ networks:
     name: rescue-net
 
 services:
-  dynamodb-local:
-    image: amazon/dynamodb-local:latest
-    container_name: dynamodb-local
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
     ports:
-      - "8000:8000"
+      - "4566:4566"
+    environment:
+      - SERVICES=dynamodb,sns,sqs
+      - AWS_DEFAULT_REGION=ap-southeast-1
     networks:
       - rescue-net
-    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"

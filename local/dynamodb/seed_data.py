@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import boto3
 
-ENDPOINT = os.environ.get("DYNAMODB_ENDPOINT", "http://localhost:8000")
+ENDPOINT = os.environ.get("DYNAMODB_ENDPOINT", "http://localhost:4566")
 REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
 TABLE_NAME = "RescueRequestTable"
 
