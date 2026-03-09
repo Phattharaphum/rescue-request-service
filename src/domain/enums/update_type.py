@@ -1,0 +1,9 @@
+from enum import Enum
+
+
+class UpdateType(str, Enum):
+    NOTE = "NOTE"
+    LOCATION_DETAILS = "LOCATION_DETAILS"
+    PEOPLE_COUNT = "PEOPLE_COUNT"
+    SPECIAL_NEEDS = "SPECIAL_NEEDS"
+    CONTACT_INFO = "CONTACT_INFO"
