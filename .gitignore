@@ -37,3 +37,6 @@ Thumbs.db
 
 # Node (SAM build)
 node_modules/
+
+# Linter cache
+.ruff_cache/
