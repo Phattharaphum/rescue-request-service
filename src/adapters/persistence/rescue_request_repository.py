@@ -88,13 +88,15 @@ def get_current_state(request_id: str) -> dict | None:
 
 
 def list_events(request_id: str, limit: int = 20, cursor: str | None = None,
-                since_version: int | None = None, order: str = "ASC") -> dict:
+                since_version: int | None = None, sort_order: str = "ASC") -> dict:
     table = _get_table()
+    if sort_order.upper() not in ("ASC", "DESC"):
+        raise ValueError(f"Invalid sort_order: {sort_order}. Must be 'ASC' or 'DESC'.")
     kwargs: dict[str, Any] = {
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk_prefix)",
         "ExpressionAttributeValues": {":pk": f"REQ#{request_id}", ":sk_prefix": "EVENT#"},
         "Limit": limit,
-        "ScanIndexForward": order.upper() != "DESC",
+        "ScanIndexForward": sort_order.upper() != "DESC",
     }
     if cursor:
         decoded = decode_cursor(cursor)
@@ -144,8 +146,7 @@ def tracking_lookup(phone_hash: str, tracking_code_hash: str) -> dict | None:
     return _convert_decimals(item) if item else None
 
 
-def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = None,
-                     status: str | None = None) -> dict:
+def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = None) -> dict:
     table = _get_table()
     kwargs: dict[str, Any] = {
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk_prefix)",
