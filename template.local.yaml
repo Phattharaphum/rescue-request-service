@@ -14,7 +14,7 @@ Globals:
         IDEMPOTENCY_TABLE_NAME: IdempotencyTable
         SNS_TOPIC_ARN: ""
         LOG_LEVEL: DEBUG
-        DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+        DYNAMODB_ENDPOINT: http://localstack:4566
 
 Resources:
   CreateRescueRequestFunction:

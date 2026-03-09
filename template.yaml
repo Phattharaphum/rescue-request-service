@@ -78,8 +78,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -130,8 +139,11 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
       Events:
         Api:
           Type: Api
@@ -183,8 +195,11 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
       Events:
         Api:
           Type: Api
@@ -219,8 +234,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -288,8 +312,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -308,8 +341,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -328,8 +370,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -348,8 +399,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -368,8 +428,17 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
-        - SNSPublishMessagePolicy:
-            TopicArn: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref RescueRequestEventsTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt RescueRequestTable.Arn
       Events:
         Api:
           Type: Api
@@ -391,3 +460,4 @@ Outputs:
   SnsTopicArn:
     Description: SNS topic ARN
     Value: !Ref RescueRequestEventsTopic
+

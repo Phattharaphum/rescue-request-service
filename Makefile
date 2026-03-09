@@ -24,9 +24,9 @@ build:
 	sam build --template-file template.yaml
 
 local-db-start:
-	cd local && docker-compose up -d dynamodb-local
+	cd local && docker-compose up -d localstack
 	sleep 3
-	cd local/dynamodb && bash create_tables.sh
+	cd local/dynamodb && DYNAMODB_ENDPOINT=http://localhost:4566 AWS_REGION=ap-southeast-1 bash create_tables.sh
 
 local-db-stop:
 	cd local && docker-compose down

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-ENDPOINT="${DYNAMODB_ENDPOINT:-http://localhost:8000}"
+ENDPOINT="${DYNAMODB_ENDPOINT:-http://localhost:4566}"
 REGION="${AWS_REGION:-ap-southeast-1}"
 
 echo "Creating RescueRequestTable..."

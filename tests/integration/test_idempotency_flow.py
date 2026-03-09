@@ -6,19 +6,19 @@ import boto3
 import pytest
 
 os.environ["STAGE"] = "local"
-os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:8000"
+os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:4566"
 os.environ["AWS_REGION"] = "ap-southeast-1"
 os.environ["DYNAMODB_TABLE_NAME"] = "RescueRequestTable"
 os.environ["IDEMPOTENCY_TABLE_NAME"] = "IdempotencyTable"
 os.environ["SNS_TOPIC_ARN"] = ""
-os.environ["AWS_ACCESS_KEY_ID"] = "testing"
-os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+os.environ["AWS_ACCESS_KEY_ID"] = "test"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
 
 from src.handlers.public.create_rescue_request import handler as create_handler
 
 
 def _create_tables():
-    dynamodb = boto3.client("dynamodb", endpoint_url="http://localhost:8000", region_name="ap-southeast-1")
+    dynamodb = boto3.client("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
     tables = dynamodb.list_tables()["TableNames"]
 
     if "RescueRequestTable" not in tables:
@@ -53,7 +53,7 @@ def setup_tables():
     try:
         _create_tables()
     except Exception:
-        pytest.skip("DynamoDB Local not available")
+        pytest.skip("LocalStack DynamoDB not available")
 
 
 class TestIdempotencyFlow:
