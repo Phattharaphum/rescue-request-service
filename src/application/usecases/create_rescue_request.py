@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from src.adapters.messaging.sns_publisher import publish_event
-from src.adapters.persistence.rescue_request_repository import create_rescue_request
+from src.adapters.persistence.rescue_request_repository import create_rescue_request, find_by_phone_hash
 from src.adapters.utils.hashing import hash_phone, hash_tracking_code
 from src.adapters.utils.phone_normalizer import normalize_phone
 from src.application.services.duplicate_detection_service import detect_duplicate, get_duplicate_signature
@@ -43,6 +43,15 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
         if replay and replay.get("replay"):
             return json.loads(replay["body"])
 
+    normalized_phone = normalize_phone(body["contactPhone"])
+    phone_hash = hash_phone(normalized_phone)
+    existing_phone_request = find_by_phone_hash(phone_hash)
+    if existing_phone_request:
+        raise ConflictError(
+            "contactPhone already has an existing request",
+            [{"field": "contactPhone", "issue": f"existing request: {existing_phone_request.get('requestId')}"}],
+        )
+
     now = datetime.now(timezone.utc).isoformat()
     request_id = str(uuid.uuid4())
 
@@ -61,8 +70,6 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
                 [{"field": "request", "issue": f"existing request: {existing_id}"}],
             )
 
-    normalized_phone = normalize_phone(body["contactPhone"])
-    phone_hash = hash_phone(normalized_phone)
     tracking_code = generate_tracking_code()
     tc_hash = hash_tracking_code(tracking_code)
 
@@ -151,6 +158,15 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
         "createdAt": now,
     }
 
+    phone_unique_item = {
+        "PK": f"PHONE#{phone_hash}",
+        "SK": "UNIQUE",
+        "itemType": "PHONE_UNIQUE",
+        "phoneHash": phone_hash,
+        "requestId": request_id,
+        "createdAt": now,
+    }
+
     incident_item = {
         "PK": f"INCIDENT#{body['incidentId']}",
         "SK": f"REQUEST#{now}#{request_id}",
@@ -178,6 +194,7 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
             current_item=current_item,
             event_item=event_item,
             tracking_item=tracking_item,
+            phone_unique_item=phone_unique_item,
             incident_item=incident_item,
             duplicate_item=duplicate_item,
         )

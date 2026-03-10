@@ -19,6 +19,10 @@ from src.handlers.public.create_rescue_request import handler as create_handler
 from src.handlers.staff.get_rescue_request import handler as get_handler
 
 
+def _random_phone() -> str:
+    return "08" + str(uuid.uuid4().int % 10**8).zfill(8)
+
+
 def _create_tables():
     dynamodb = boto3.client("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
     tables = dynamodb.list_tables()["TableNames"]
@@ -78,7 +82,7 @@ class TestCreateRequestFlow:
             "latitude": 13.7563,
             "longitude": 100.5018,
             "contactName": "Test User",
-            "contactPhone": "0812345678",
+            "contactPhone": _random_phone(),
             "sourceChannel": "WEB",
         }
         response = create_handler(self._build_event(body), None)
@@ -103,7 +107,7 @@ class TestCreateRequestFlow:
             "latitude": 13.8,
             "longitude": 100.6,
             "contactName": "Test User 2",
-            "contactPhone": "0899999999",
+            "contactPhone": _random_phone(),
             "sourceChannel": "MOBILE",
         }
         create_response = create_handler(self._build_event(body), None)
@@ -124,3 +128,34 @@ class TestCreateRequestFlow:
         get_result = json.loads(get_response["body"])
         assert get_result["master"]["requestId"] == request_id
         assert get_result["currentState"]["status"] == "SUBMITTED"
+        assert get_result["updateItems"] == []
+
+    def test_create_request_duplicate_phone_conflict(self):
+        phone = _random_phone()
+        body1 = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "FLOOD",
+            "description": "First request",
+            "peopleCount": 2,
+            "latitude": 13.7563,
+            "longitude": 100.5018,
+            "contactName": "Dup User 1",
+            "contactPhone": phone,
+            "sourceChannel": "WEB",
+        }
+        body2 = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "FIRE",
+            "description": "Second request with same phone",
+            "peopleCount": 1,
+            "latitude": 13.7001,
+            "longitude": 100.5001,
+            "contactName": "Dup User 2",
+            "contactPhone": phone,
+            "sourceChannel": "MOBILE",
+        }
+
+        response1 = create_handler(self._build_event(body1), None)
+        assert response1["statusCode"] == 201
+        response2 = create_handler(self._build_event(body2), None)
+        assert response2["statusCode"] == 409

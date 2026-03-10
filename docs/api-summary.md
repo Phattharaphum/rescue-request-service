@@ -156,9 +156,12 @@ Creates a new rescue request.
 On success the service returns a short **tracking code** that the citizen can use later,
 together with their phone number, to look up the status of their request.
 
-**Duplicate detection** — a `409 Conflict` is returned if a request with the same
-incident, phone, request type, approximate location, and submission time (within a
-5-minute window) already exists and no idempotency key was supplied.
+**Phone uniqueness** — a `409 Conflict` is returned if `contactPhone` already exists
+in any prior request.
+
+**Duplicate detection** — additionally, a `409 Conflict` is returned if a request with
+the same incident, phone, request type, approximate location, and submission time
+(within a 5-minute window) already exists and no idempotency key was supplied.
 
 #### Request
 
@@ -220,7 +223,7 @@ incident, phone, request type, approximate location, and submission time (within
 | `status` | RequestStatus | Always `SUBMITTED` |
 | `submittedAt` | ISO-8601 | UTC submission timestamp |
 
-**Error responses:** `409` (duplicate), `422` (validation)
+**Error responses:** `409` (phone already exists / duplicate), `422` (validation)
 
 ---
 
@@ -257,7 +260,7 @@ Looks up a rescue request using the citizen's phone number and tracking code.
 
 ### 6.3 GET /citizen/rescue-requests/{requestId}/status
 
-Returns a simplified, citizen-facing status summary for a rescue request.
+Returns a detailed citizen-facing status snapshot for tracking progress.
 
 #### Path Parameters
 
@@ -270,22 +273,88 @@ Returns a simplified, citizen-facing status summary for a rescue request.
 ```json
 {
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "incidentId": "INC-2024-001",
+  "requestType": "FLOOD",
   "status": "ASSIGNED",
+  "statusMessage": "มีการมอบหมายหน่วยช่วยเหลือแล้ว กรุณาติดตามการอัปเดตล่าสุด",
+  "nextSuggestedAction": "เตรียมพร้อมรับการติดต่อจากหน่วยช่วยเหลือ",
+  "description": "Water level rising rapidly, 5 people trapped on second floor",
+  "peopleCount": 5,
+  "specialNeeds": "Elderly person, needs wheelchair",
+  "submittedAt": "2024-01-15T10:30:00.000000+00:00",
+  "lastCitizenUpdateAt": "2024-01-15T10:45:00.000000+00:00",
+  "contactName": "Somchai Jaidee",
+  "contactPhoneMasked": "081****678",
+  "location": {
+    "latitude": 13.7563,
+    "longitude": 100.5018,
+    "locationDetails": "Yellow house next to the big banyan tree",
+    "addressLine": "123 Silom Road",
+    "province": "Bangkok",
+    "district": "Bang Rak",
+    "subdistrict": "Bang Rak"
+  },
   "priorityLevel": "HIGH",
   "assignedUnitId": "UNIT-007",
+  "assignedAt": "2024-01-15T11:00:00.000000+00:00",
+  "latestNote": "Forwarded to responder unit",
   "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
-  "stateVersion": 3
+  "stateVersion": 3,
+  "latestEvent": {
+    "eventId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "version": 3,
+    "previousStatus": "TRIAGED",
+    "newStatus": "ASSIGNED",
+    "occurredAt": "2024-01-15T11:00:00.000000+00:00",
+    "changeReason": null,
+    "meta": {
+      "dispatchChannel": "RADIO"
+    },
+    "priorityScore": 85.5,
+    "responderUnitId": "UNIT-007"
+  },
+  "recentEvents": [
+    {
+      "eventId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "version": 3,
+      "previousStatus": "TRIAGED",
+      "newStatus": "ASSIGNED",
+      "occurredAt": "2024-01-15T11:00:00.000000+00:00",
+      "changeReason": null,
+      "meta": {
+        "dispatchChannel": "RADIO"
+      },
+      "priorityScore": 85.5,
+      "responderUnitId": "UNIT-007"
+    }
+  ]
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `requestId` | UUID | |
+| `incidentId` | string | Incident identifier |
+| `requestType` | RequestType | Original request category |
 | `status` | RequestStatus | Current lifecycle status |
+| `statusMessage` | string \| null | Human-readable status description |
+| `nextSuggestedAction` | string \| null | Suggested action for the citizen |
+| `description` | string \| null | Original request description |
+| `peopleCount` | integer \| null | Latest known affected people count |
+| `specialNeeds` | string \| null | Special-needs details |
+| `submittedAt` | ISO-8601 \| null | Initial submission time |
+| `lastCitizenUpdateAt` | ISO-8601 \| null | Last citizen update timestamp |
+| `contactName` | string \| null | Contact name on the request |
+| `contactPhoneMasked` | string \| null | Masked contact phone number |
+| `location` | object | Location snapshot from the request |
 | `priorityLevel` | string \| null | Human-readable priority label |
 | `assignedUnitId` | string \| null | Responding unit, if assigned |
+| `assignedAt` | ISO-8601 \| null | Assignment timestamp |
+| `latestNote` | string \| null | Latest tracking note |
 | `lastUpdatedAt` | ISO-8601 \| null | Last state change timestamp |
 | `stateVersion` | integer | Monotonically increasing version counter |
+| `latestEvent` | object \| null | Most recent status event (includes `meta`) |
+| `recentEvents` | array | Up to 5 latest status events (newest first) |
 
 **Error responses:** `404`
 
@@ -304,12 +373,21 @@ Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELL
 |----------|-------|------|----------|-------------|
 | Path | `requestId` | UUID | **Yes** | |
 | Header | `X-Idempotency-Key` | UUID | No | Idempotency key |
+| Body | `trackingCode` | string | **Yes** | Tracking code used to authorize the update |
 | Body | `updateType` | UpdateType | **Yes** | Category of update |
 | Body | `updatePayload` | object | **Yes** | Update-specific payload (see [UpdateType](#updatetype)) |
+
+`updatePayload` is validated by `updateType`:
+- `NOTE` -> requires `note` (non-empty string)
+- `LOCATION_DETAILS` -> requires `locationDetails` (non-empty string)
+- `PEOPLE_COUNT` -> requires `peopleCount` (integer > 0)
+- `SPECIAL_NEEDS` -> requires `specialNeeds` (non-empty string)
+- `CONTACT_INFO` -> requires at least one of `contactPhone` / `contactName`
 
 **Example request body:**
 ```json
 {
+  "trackingCode": "123456",
   "updateType": "PEOPLE_COUNT",
   "updatePayload": { "peopleCount": 7 }
 }
@@ -326,7 +404,7 @@ Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELL
 }
 ```
 
-**Error responses:** `404`, `409` (terminal state), `422`
+**Error responses:** `403` (trackingCode invalid), `404`, `409` (terminal state), `422`
 
 ---
 
@@ -360,14 +438,18 @@ Returns a paginated list of all citizen-submitted updates for a rescue request.
 }
 ```
 
+**Error responses:** `400` (invalid `since` format), `404` (request not found)
+
 ---
 
 ## 7. Staff Endpoints
 
 ### 7.1 GET /rescue-requests/{requestId}
 
-Retrieves the master record and current state of a rescue request.
-Optionally embeds the status-event history and/or citizen-submitted updates.
+Retrieves full details of a rescue request.
+`master` is the original first report (not overwritten by citizen updates),
+`updateItems` is the list of citizen-submitted updates, and `currentState` is the latest state.
+Optionally embeds the status-event history.
 
 #### Query Parameters
 
@@ -413,12 +495,22 @@ Optionally embeds the status-event history and/or citizen-submitted updates.
     "latestNote": "Team dispatched, ETA 15 minutes",
     "lastUpdatedBy": "dispatcher-01",
     "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
-  }
+  },
+  "updateItems": [
+    {
+      "updateId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "requestId": "550e8400-e29b-41d4-a716-446655440000",
+      "updateType": "PEOPLE_COUNT",
+      "updatePayload": { "peopleCount": 7 },
+      "citizenAuthMethod": "tracking_code",
+      "createdAt": "2024-01-15T10:45:00.000000+00:00"
+    }
+  ]
 }
 ```
 
 When `includeEvents=true` an `"events"` array is added.
-When `includeCitizenUpdates=true` a `"citizenUpdates"` array is added.
+When `includeCitizenUpdates=true` a `"citizenUpdates"` array is also returned as a backward-compatible alias of `updateItems`.
 
 **Error responses:** `404`
 
@@ -829,7 +921,7 @@ All events are wrapped in the following envelope:
 |------------|---------|--------------|
 | `rescue-request.created` | New request created | `requestId`, `data` (master record) |
 | `rescue-request.status-changed` | Any state transition | `requestId`, `previousStatus`, `newStatus`, `eventId`, `version` |
-| `rescue-request.citizen-updated` | Citizen submits an update | `requestId`, `updateId`, `updateType` |
+| `rescue-request.citizen-updated` | Citizen submits an update | `requestId`, `updateId`, `updateType`, `updatePayload`, `createdAt` |
 | `rescue-request.resolved` | Request resolved | `requestId`, `eventId` |
 | `rescue-request.cancelled` | Request cancelled | `requestId`, `eventId`, `reason` |
 
@@ -898,3 +990,5 @@ existing request.
 
 > Duplicate detection is **bypassed** when an `X-Idempotency-Key` header is present.
 > Idempotent retries are always safe.
+>
+> Phone uniqueness by `contactPhone` is still enforced globally.

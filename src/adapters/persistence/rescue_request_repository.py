@@ -2,13 +2,17 @@ import json
 from decimal import Decimal
 from typing import Any
 
+from boto3.dynamodb.types import TypeSerializer
+from botocore.exceptions import ClientError
+
 from src.adapters.persistence.dynamodb_client import get_dynamodb_resource
 from src.adapters.utils.cursor import decode_cursor, encode_cursor
-from src.shared.config import DYNAMODB_TABLE_NAME
+from src.shared.config import DYNAMODB_TABLE_NAME, STAGE
 from src.shared.errors import ConflictError, NotFoundError
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
+_serializer = TypeSerializer()
 
 
 def _get_table():
@@ -41,11 +45,44 @@ def _to_dynamodb_item(data: dict) -> dict:
     return result
 
 
+def _to_dynamodb_attribute_map(data: dict) -> dict:
+    """Convert Python values into low-level DynamoDB AttributeValue map for client APIs."""
+    return {k: _serializer.serialize(v) for k, v in data.items()}
+
+
+def _to_dynamodb_value(value: Any) -> Any:
+    """Normalize a single Python value to a DynamoDB-serializable value."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, (dict, list)):
+        return json.loads(json.dumps(value), parse_float=Decimal)
+    return value
+
+
+def _build_update_components(current_updates: dict[str, Any]) -> tuple[list[str], dict[str, str], dict[str, Any], dict[str, Any]]:
+    update_expr_parts: list[str] = []
+    expr_attr_names: dict[str, str] = {}
+    expr_attr_values_client: dict[str, Any] = {}
+    expr_attr_values_resource: dict[str, Any] = {}
+
+    for key, value in current_updates.items():
+        safe_key = f"#k_{key}"
+        safe_val = f":v_{key}"
+        normalized = _to_dynamodb_value(value)
+        expr_attr_names[safe_key] = key
+        expr_attr_values_client[safe_val] = _serializer.serialize(normalized)
+        expr_attr_values_resource[safe_val] = normalized
+        update_expr_parts.append(f"{safe_key} = {safe_val}")
+
+    return update_expr_parts, expr_attr_names, expr_attr_values_client, expr_attr_values_resource
+
+
 def create_rescue_request(
     master_item: dict,
     current_item: dict,
     event_item: dict,
     tracking_item: dict,
+    phone_unique_item: dict | None,
     incident_item: dict,
     duplicate_item: dict | None = None,
 ) -> None:
@@ -53,6 +90,8 @@ def create_rescue_request(
     resource = get_dynamodb_resource()
 
     items = [master_item, current_item, event_item, tracking_item, incident_item]
+    if phone_unique_item:
+        items.append(phone_unique_item)
     if duplicate_item:
         items.append(duplicate_item)
 
@@ -61,16 +100,36 @@ def create_rescue_request(
         transact_items.append({
             "Put": {
                 "TableName": DYNAMODB_TABLE_NAME,
-                "Item": _to_dynamodb_item(item),
+                "Item": _to_dynamodb_attribute_map(_to_dynamodb_item(item)),
             }
         })
 
     client = resource.meta.client
     try:
         client.transact_write_items(TransactItems=transact_items)
-    except client.exceptions.TransactionCanceledException as e:
-        logger.error(f"Transaction cancelled: {e}")
-        raise ConflictError("Failed to create rescue request - transaction conflict")
+        return
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "TransactionCanceledException":
+            logger.error(f"Transaction cancelled: {e}")
+            raise ConflictError("Failed to create rescue request - transaction conflict")
+        if STAGE == "local" and error_code == "ValidationException":
+            # LocalStack can reject transaction payloads that real DynamoDB accepts.
+            # Fallback keeps local development unblocked.
+            logger.warning("Falling back to non-transactional local write for create_rescue_request")
+            try:
+                for item in items:
+                    table.put_item(
+                        Item=_to_dynamodb_item(item),
+                        ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+                    )
+                return
+            except ClientError as fallback_error:
+                fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
+                if fallback_code == "ConditionalCheckFailedException":
+                    raise ConflictError("Failed to create rescue request - transaction conflict")
+                raise
+        raise
 
 
 def get_master(request_id: str) -> dict | None:
@@ -88,15 +147,17 @@ def get_current_state(request_id: str) -> dict | None:
 
 
 def list_events(request_id: str, limit: int = 20, cursor: str | None = None,
-                since_version: int | None = None, sort_order: str = "ASC") -> dict:
+                since_version: int | None = None, order: str = "ASC", sort_order: str | None = None) -> dict:
     table = _get_table()
-    if sort_order.upper() not in ("ASC", "DESC"):
-        raise ValueError(f"Invalid sort_order: {sort_order}. Must be 'ASC' or 'DESC'.")
+    # Backward compatibility: allow legacy callers that still pass sort_order.
+    resolved_order = sort_order if sort_order is not None else order
+    if resolved_order.upper() not in ("ASC", "DESC"):
+        raise ValueError(f"Invalid order: {resolved_order}. Must be 'ASC' or 'DESC'.")
     kwargs: dict[str, Any] = {
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk_prefix)",
         "ExpressionAttributeValues": {":pk": f"REQ#{request_id}", ":sk_prefix": "EVENT#"},
         "Limit": limit,
-        "ScanIndexForward": sort_order.upper() != "DESC",
+        "ScanIndexForward": resolved_order.upper() != "DESC",
     }
     if cursor:
         decoded = decode_cursor(cursor)
@@ -146,7 +207,19 @@ def tracking_lookup(phone_hash: str, tracking_code_hash: str) -> dict | None:
     return _convert_decimals(item) if item else None
 
 
-def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = None) -> dict:
+def find_by_phone_hash(phone_hash: str) -> dict | None:
+    table = _get_table()
+    resp = table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": f"TRACK#{phone_hash}"},
+        Limit=1,
+    )
+    items = resp.get("Items", [])
+    return _convert_decimals(items[0]) if items else None
+
+
+def list_by_incident(incident_id: str, limit: int = 20, cursor: str | None = None,
+                     status: str | None = None) -> dict:
     table = _get_table()
     kwargs: dict[str, Any] = {
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk_prefix)",
@@ -171,33 +244,19 @@ def append_event_and_update_current(request_id: str, event_item: dict, current_u
                                     expected_version: int | None = None) -> None:
     resource = get_dynamodb_resource()
     client = resource.meta.client
+    table = _get_table()
 
     transact_items = [
         {
             "Put": {
                 "TableName": DYNAMODB_TABLE_NAME,
-                "Item": _to_dynamodb_item(event_item),
+                "Item": _to_dynamodb_attribute_map(_to_dynamodb_item(event_item)),
                 "ConditionExpression": "attribute_not_exists(PK)",
             }
         },
     ]
 
-    update_expr_parts = []
-    expr_attr_values = {}
-    expr_attr_names = {}
-    for key, value in current_updates.items():
-        safe_key = f"#k_{key}"
-        safe_val = f":v_{key}"
-        expr_attr_names[safe_key] = key
-        if isinstance(value, float):
-            expr_attr_values[safe_val] = {"N": str(value)}
-        elif isinstance(value, int):
-            expr_attr_values[safe_val] = {"N": str(value)}
-        elif value is None:
-            expr_attr_values[safe_val] = {"NULL": True}
-        else:
-            expr_attr_values[safe_val] = {"S": str(value)}
-        update_expr_parts.append(f"{safe_key} = {safe_val}")
+    update_expr_parts, expr_attr_names, expr_attr_values, expr_attr_values_resource = _build_update_components(current_updates)
 
     update_item = {
         "Update": {
@@ -214,14 +273,44 @@ def append_event_and_update_current(request_id: str, event_item: dict, current_u
     if expected_version is not None:
         update_item["Update"]["ConditionExpression"] = "stateVersion = :expected_version"
         update_item["Update"]["ExpressionAttributeValues"][":expected_version"] = {"N": str(expected_version)}
+        expr_attr_values_resource[":expected_version"] = expected_version
 
     transact_items.append(update_item)
 
     try:
         client.transact_write_items(TransactItems=transact_items)
-    except client.exceptions.TransactionCanceledException as e:
-        logger.error(f"Transition transaction cancelled: {e}")
-        raise ConflictError("State transition conflict - concurrent modification detected")
+        return
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "TransactionCanceledException":
+            logger.error(f"Transition transaction cancelled: {e}")
+            raise ConflictError("State transition conflict - concurrent modification detected")
+        if STAGE == "local" and error_code == "ValidationException":
+            # LocalStack can reject some transaction payloads that DynamoDB accepts.
+            # Fallback keeps local development unblocked while preserving conditional checks.
+            logger.warning("Falling back to non-transactional local write due to ValidationException")
+            try:
+                table.put_item(
+                    Item=_to_dynamodb_item(event_item),
+                    ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+                )
+                resource_update_kwargs: dict[str, Any] = {
+                    "Key": {"PK": f"REQ#{request_id}", "SK": "CURRENT"},
+                    "UpdateExpression": "SET " + ", ".join(update_expr_parts),
+                    "ExpressionAttributeNames": dict(expr_attr_names),
+                    "ExpressionAttributeValues": dict(expr_attr_values_resource),
+                }
+                if expected_version is not None:
+                    resource_update_kwargs["ConditionExpression"] = "#cv = :expected_version"
+                    resource_update_kwargs["ExpressionAttributeNames"]["#cv"] = "stateVersion"
+                table.update_item(**resource_update_kwargs)
+                return
+            except ClientError as fallback_error:
+                fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
+                if fallback_code == "ConditionalCheckFailedException":
+                    raise ConflictError("State transition conflict - concurrent modification detected")
+                raise
+        raise
 
 
 def put_citizen_update(item: dict) -> None:
