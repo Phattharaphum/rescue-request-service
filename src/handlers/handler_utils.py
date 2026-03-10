@@ -3,7 +3,16 @@ from typing import Any
 
 from src.shared.errors import AppError
 from src.shared.logger import get_logger
-from src.shared.response import bad_request, conflict, forbidden, internal_error, not_found, service_unavailable, unprocessable_entity
+from src.shared.response import (
+    bad_request,
+    conflict,
+    default_headers,
+    forbidden,
+    internal_error,
+    not_found,
+    service_unavailable,
+    unprocessable_entity,
+)
 
 logger = get_logger(__name__)
 
@@ -50,7 +59,7 @@ def handle_error(e: Exception) -> dict[str, Any]:
         body["traceId"] = str(uuid.uuid4())
         return {
             "statusCode": status,
-            "headers": {"Content-Type": "application/json"},
+            "headers": default_headers(),
             "body": json.dumps(body, default=str),
         }
     logger.exception("Unhandled error")

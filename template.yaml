@@ -60,12 +60,45 @@ Resources:
     Properties:
       TopicName: !Sub "rescue-request-events-v1-${Stage}"
 
+  RescueRequestEventsStreamQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "rescue-request-events-v1-stream-${Stage}"
+
+  RescueRequestEventsStreamQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref RescueRequestEventsStreamQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSnsPublish
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt RescueRequestEventsStreamQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RescueRequestEventsTopic
+
+  RescueRequestEventsStreamSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref RescueRequestEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt RescueRequestEventsStreamQueue.Arn
+
   # API Gateway
   RescueRequestApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Stage
       TracingEnabled: true
+      Cors:
+        AllowOrigin: "'https://rescue-request.phatphum.me'"
+        AllowHeaders: "'Content-Type,X-Trace-Id,X-Idempotency-Key,If-Match,Authorization'"
+        AllowMethods: "'GET,POST,PATCH,OPTIONS'"
 
   # Public Handlers
   CreateRescueRequestFunction:
@@ -391,5 +424,8 @@ Outputs:
   SnsTopicArn:
     Description: SNS topic ARN
     Value: !Ref RescueRequestEventsTopic
+  SQSQueueUrl:
+    Description: SQS queue URL subscribed to rescue request events topic
+    Value: !Ref RescueRequestEventsStreamQueue
 
 

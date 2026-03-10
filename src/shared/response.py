@@ -2,14 +2,21 @@ import json
 import uuid
 from typing import Any
 
+ALLOWED_ORIGIN = "https://rescue-request.phatphum.me"
+
+
+def default_headers() -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "X-Trace-Id": str(uuid.uuid4()),
+        "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    }
+
 
 def _build_response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
     return {
         "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "X-Trace-Id": str(uuid.uuid4()),
-        },
+        "headers": default_headers(),
         "body": json.dumps(body, default=str),
     }
 

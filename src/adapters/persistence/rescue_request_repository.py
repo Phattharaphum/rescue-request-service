@@ -1,4 +1,5 @@
 import json
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -8,7 +9,7 @@ from botocore.exceptions import ClientError
 from src.adapters.persistence.dynamodb_client import get_dynamodb_resource
 from src.adapters.utils.cursor import decode_cursor, encode_cursor
 from src.shared.config import DYNAMODB_TABLE_NAME, STAGE
-from src.shared.errors import ConflictError, NotFoundError
+from src.shared.errors import ConflictError, NotFoundError, ValidationError
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -47,7 +48,16 @@ def _to_dynamodb_item(data: dict) -> dict:
 
 def _to_dynamodb_attribute_map(data: dict) -> dict:
     """Convert Python values into low-level DynamoDB AttributeValue map for client APIs."""
-    return {k: _serializer.serialize(v) for k, v in data.items()}
+    attr_map: dict[str, Any] = {}
+    for k, v in data.items():
+        if k in ("PK", "SK"):
+            if isinstance(v, dict) and isinstance(v.get("S"), str):
+                attr_map[k] = {"S": v["S"]}
+            else:
+                attr_map[k] = {"S": str(v)}
+            continue
+        attr_map[k] = _serializer.serialize(v)
+    return attr_map
 
 
 def _to_dynamodb_value(value: Any) -> Any:
@@ -57,6 +67,153 @@ def _to_dynamodb_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return json.loads(json.dumps(value), parse_float=Decimal)
     return value
+
+
+def _normalize_primary_key_types(item: dict, item_index: int) -> dict:
+    normalized = dict(item)
+    for key_attr in ("PK", "SK"):
+        if key_attr not in normalized:
+            raise ValidationError(
+                "Failed to create rescue request - invalid request data for persistence",
+                [{"field": "request", "issue": f"missing key attribute {key_attr} in item index {item_index}"}],
+            )
+
+        key_value = normalized[key_attr]
+        if isinstance(key_value, dict):
+            # Defensive normalization for malformed or pre-serialized key values.
+            if isinstance(key_value.get("S"), str):
+                normalized[key_attr] = key_value["S"]
+            else:
+                normalized[key_attr] = json.dumps(key_value, ensure_ascii=False, sort_keys=True)
+        elif not isinstance(key_value, str):
+            normalized[key_attr] = str(key_value)
+
+    return normalized
+
+
+def _build_transact_put_item(item: dict, item_index: int, condition_expression: str | None = None) -> dict:
+    normalized_item = _normalize_primary_key_types(item, item_index)
+    put_item: dict[str, Any] = {
+        "TableName": DYNAMODB_TABLE_NAME,
+        "Item": _to_dynamodb_attribute_map(_to_dynamodb_item(normalized_item)),
+    }
+    if condition_expression:
+        put_item["ConditionExpression"] = condition_expression
+    return {"Put": put_item}
+
+
+def _describe_transact_key_attr_kinds(transact_items: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for index, transact_item in enumerate(transact_items):
+        item = transact_item.get("Put", {}).get("Item", {})
+        pk_attr = item.get("PK")
+        sk_attr = item.get("SK")
+        pk_kind = ",".join(pk_attr.keys()) if isinstance(pk_attr, dict) else type(pk_attr).__name__
+        sk_kind = ",".join(sk_attr.keys()) if isinstance(sk_attr, dict) else type(sk_attr).__name__
+        parts.append(f"item{index}.PK={pk_kind}; item{index}.SK={sk_kind}")
+    return " | ".join(parts)
+
+
+def _local_fallback_put_items(table, items: list[dict]) -> None:
+    _put_items_with_rollback(table, items)
+
+
+def _put_items_with_rollback(table, items: list[dict]) -> None:
+    inserted_keys: list[dict[str, str]] = []
+
+    for index, item in enumerate(items):
+        normalized_item = _normalize_primary_key_types(item, index)
+        try:
+            table.put_item(
+                Item=_to_dynamodb_item(normalized_item),
+                ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+            )
+            inserted_keys.append({"PK": normalized_item["PK"], "SK": normalized_item["SK"]})
+        except ClientError:
+            for key in reversed(inserted_keys):
+                try:
+                    table.delete_item(Key=key)
+                except ClientError:
+                    logger.exception("Failed to roll back create_rescue_request item for key %s", key)
+            raise
+
+
+def _fallback_append_event_and_update_current(
+    table,
+    request_id: str,
+    normalized_event_item: dict[str, Any],
+    update_expr_parts: list[str],
+    expr_attr_names: dict[str, str],
+    expr_attr_values_resource: dict[str, Any],
+    expected_version: int | None,
+) -> None:
+    try:
+        table.put_item(
+            Item=_to_dynamodb_item(normalized_event_item),
+            ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+        )
+        resource_update_kwargs: dict[str, Any] = {
+            "Key": {"PK": f"REQ#{request_id}", "SK": "CURRENT"},
+            "UpdateExpression": "SET " + ", ".join(update_expr_parts),
+            "ExpressionAttributeNames": dict(expr_attr_names),
+            "ExpressionAttributeValues": dict(expr_attr_values_resource),
+        }
+        if expected_version is not None:
+            resource_update_kwargs["ConditionExpression"] = "#cv = :expected_version"
+            resource_update_kwargs["ExpressionAttributeNames"]["#cv"] = "stateVersion"
+        table.update_item(**resource_update_kwargs)
+    except ClientError:
+        try:
+            table.delete_item(Key={"PK": normalized_event_item["PK"], "SK": normalized_event_item["SK"]})
+        except ClientError:
+            logger.exception(
+                "Failed to roll back status event item for request %s version key %s",
+                request_id,
+                normalized_event_item["SK"],
+            )
+        raise
+
+
+def _is_transaction_conflict_error(error: ClientError) -> bool:
+    if error.response.get("Error", {}).get("Code", "") != "TransactionCanceledException":
+        return False
+
+    cancellation_reasons = error.response.get("CancellationReasons") or []
+    if any((reason or {}).get("Code") == "TransactionConflict" for reason in cancellation_reasons):
+        return True
+
+    message = error.response.get("Error", {}).get("Message", "")
+    return "transaction conflict" in message.lower()
+
+
+def _has_cancellation_reason(error: ClientError, reason_code: str) -> bool:
+    cancellation_reasons = error.response.get("CancellationReasons") or []
+    return any((reason or {}).get("Code") == reason_code for reason in cancellation_reasons)
+
+
+def _first_cancellation_reason_message(error: ClientError, reason_code: str) -> str | None:
+    cancellation_reasons = error.response.get("CancellationReasons") or []
+    for reason in cancellation_reasons:
+        if (reason or {}).get("Code") == reason_code:
+            message = (reason or {}).get("Message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+    return None
+
+
+def _contains_key_type_mismatch_message(message: str | None) -> bool:
+    if not isinstance(message, str):
+        return False
+    lowered = message.lower()
+    return "type mismatch for key" in lowered and "expected: s" in lowered and "actual: m" in lowered
+
+
+def _is_key_type_mismatch_validation_error(error: ClientError) -> bool:
+    if _contains_key_type_mismatch_message(error.response.get("Error", {}).get("Message")):
+        return True
+
+    cancellation_reasons = error.response.get("CancellationReasons") or []
+    return any(_contains_key_type_mismatch_message((reason or {}).get("Message")) for reason in cancellation_reasons)
 
 
 def _build_update_components(current_updates: dict[str, Any]) -> tuple[list[str], dict[str, str], dict[str, Any], dict[str, Any]]:
@@ -95,41 +252,76 @@ def create_rescue_request(
     if duplicate_item:
         items.append(duplicate_item)
 
-    transact_items = []
-    for item in items:
-        transact_items.append({
-            "Put": {
-                "TableName": DYNAMODB_TABLE_NAME,
-                "Item": _to_dynamodb_attribute_map(_to_dynamodb_item(item)),
-            }
-        })
+    transact_items = [_build_transact_put_item(item, index) for index, item in enumerate(items)]
+    transact_key_attr_kinds = _describe_transact_key_attr_kinds(transact_items)
 
     client = resource.meta.client
-    try:
-        client.transact_write_items(TransactItems=transact_items)
-        return
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-        if error_code == "TransactionCanceledException":
-            logger.error(f"Transaction cancelled: {e}")
-            raise ConflictError("Failed to create rescue request - transaction conflict")
-        if STAGE == "local" and error_code == "ValidationException":
-            # LocalStack can reject transaction payloads that real DynamoDB accepts.
-            # Fallback keeps local development unblocked.
-            logger.warning("Falling back to non-transactional local write for create_rescue_request")
-            try:
-                for item in items:
-                    table.put_item(
-                        Item=_to_dynamodb_item(item),
-                        ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            client.transact_write_items(TransactItems=transact_items)
+            return
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+
+            if error_code == "TransactionCanceledException":
+                if _is_transaction_conflict_error(e) and attempt < max_retries - 1:
+                    time.sleep(0.05 * (2 ** attempt))
+                    continue
+
+                if _has_cancellation_reason(e, "ValidationError"):
+                    validation_message = _first_cancellation_reason_message(e, "ValidationError")
+                    if _is_key_type_mismatch_validation_error(e):
+                        logger.warning(
+                            "Falling back to conditional puts for create_rescue_request due to transaction key type mismatch"
+                        )
+                        try:
+                            _put_items_with_rollback(table, items)
+                            return
+                        except ClientError as fallback_error:
+                            fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
+                            if fallback_code == "ConditionalCheckFailedException":
+                                raise ConflictError("Failed to create rescue request - transaction conflict")
+                            raise
+                    raise ValidationError(
+                        "Failed to create rescue request - invalid request data for persistence",
+                        [{
+                            "field": "request",
+                            "issue": (
+                                f"{validation_message or 'contains unsupported value(s) for DynamoDB'} "
+                                f"(debug: {transact_key_attr_kinds})"
+                            ),
+                        }],
                     )
-                return
-            except ClientError as fallback_error:
-                fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
-                if fallback_code == "ConditionalCheckFailedException":
-                    raise ConflictError("Failed to create rescue request - transaction conflict")
-                raise
-        raise
+
+                if STAGE == "local":
+                    logger.warning("Falling back to non-transactional local write for create_rescue_request")
+                    try:
+                        _local_fallback_put_items(table, items)
+                        return
+                    except ClientError as fallback_error:
+                        fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
+                        if fallback_code == "ConditionalCheckFailedException":
+                            raise ConflictError("Failed to create rescue request - transaction conflict")
+                        raise
+
+                logger.error(f"Transaction cancelled: {e}")
+                raise ConflictError("Failed to create rescue request - transaction conflict")
+
+            if STAGE == "local" and error_code == "ValidationException":
+                # LocalStack can reject transaction payloads that real DynamoDB accepts.
+                # Fallback keeps local development unblocked.
+                logger.warning("Falling back to non-transactional local write for create_rescue_request")
+                try:
+                    _local_fallback_put_items(table, items)
+                    return
+                except ClientError as fallback_error:
+                    fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
+                    if fallback_code == "ConditionalCheckFailedException":
+                        raise ConflictError("Failed to create rescue request - transaction conflict")
+                    raise
+
+            raise
 
 
 def get_master(request_id: str) -> dict | None:
@@ -246,15 +438,12 @@ def append_event_and_update_current(request_id: str, event_item: dict, current_u
     client = resource.meta.client
     table = _get_table()
 
-    transact_items = [
-        {
-            "Put": {
-                "TableName": DYNAMODB_TABLE_NAME,
-                "Item": _to_dynamodb_attribute_map(_to_dynamodb_item(event_item)),
-                "ConditionExpression": "attribute_not_exists(PK)",
-            }
-        },
-    ]
+    normalized_event_item = _normalize_primary_key_types(event_item, 0)
+    transact_items = [_build_transact_put_item(
+        normalized_event_item,
+        0,
+        condition_expression="attribute_not_exists(PK)",
+    )]
 
     update_expr_parts, expr_attr_names, expr_attr_values, expr_attr_values_resource = _build_update_components(current_updates)
 
@@ -283,6 +472,38 @@ def append_event_and_update_current(request_id: str, event_item: dict, current_u
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "TransactionCanceledException":
+            if _is_transaction_conflict_error(e):
+                logger.error(f"Transition transaction cancelled due to conflict: {e}")
+                raise ConflictError("State transition conflict - concurrent modification detected")
+
+            if _is_key_type_mismatch_validation_error(e):
+                logger.warning(
+                    "Falling back to conditional write for append_event_and_update_current due to transaction key type mismatch"
+                )
+                try:
+                    _fallback_append_event_and_update_current(
+                        table=table,
+                        request_id=request_id,
+                        normalized_event_item=normalized_event_item,
+                        update_expr_parts=update_expr_parts,
+                        expr_attr_names=expr_attr_names,
+                        expr_attr_values_resource=expr_attr_values_resource,
+                        expected_version=expected_version,
+                    )
+                    return
+                except ClientError as fallback_error:
+                    fallback_code = fallback_error.response.get("Error", {}).get("Code", "")
+                    if fallback_code == "ConditionalCheckFailedException":
+                        raise ConflictError("State transition conflict - concurrent modification detected")
+                    raise
+
+            validation_message = _first_cancellation_reason_message(e, "ValidationError")
+            if validation_message:
+                raise ValidationError(
+                    "Failed to append status event - invalid request data for persistence",
+                    [{"field": "request", "issue": validation_message}],
+                )
+
             logger.error(f"Transition transaction cancelled: {e}")
             raise ConflictError("State transition conflict - concurrent modification detected")
         if STAGE == "local" and error_code == "ValidationException":
@@ -290,20 +511,15 @@ def append_event_and_update_current(request_id: str, event_item: dict, current_u
             # Fallback keeps local development unblocked while preserving conditional checks.
             logger.warning("Falling back to non-transactional local write due to ValidationException")
             try:
-                table.put_item(
-                    Item=_to_dynamodb_item(event_item),
-                    ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+                _fallback_append_event_and_update_current(
+                    table=table,
+                    request_id=request_id,
+                    normalized_event_item=normalized_event_item,
+                    update_expr_parts=update_expr_parts,
+                    expr_attr_names=expr_attr_names,
+                    expr_attr_values_resource=expr_attr_values_resource,
+                    expected_version=expected_version,
                 )
-                resource_update_kwargs: dict[str, Any] = {
-                    "Key": {"PK": f"REQ#{request_id}", "SK": "CURRENT"},
-                    "UpdateExpression": "SET " + ", ".join(update_expr_parts),
-                    "ExpressionAttributeNames": dict(expr_attr_names),
-                    "ExpressionAttributeValues": dict(expr_attr_values_resource),
-                }
-                if expected_version is not None:
-                    resource_update_kwargs["ConditionExpression"] = "#cv = :expected_version"
-                    resource_update_kwargs["ExpressionAttributeNames"]["#cv"] = "stateVersion"
-                table.update_item(**resource_update_kwargs)
                 return
             except ClientError as fallback_error:
                 fallback_code = fallback_error.response.get("Error", {}).get("Code", "")

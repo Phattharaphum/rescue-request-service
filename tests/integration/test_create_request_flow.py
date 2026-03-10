@@ -159,3 +159,48 @@ class TestCreateRequestFlow:
         assert response1["statusCode"] == 201
         response2 = create_handler(self._build_event(body2), None)
         assert response2["statusCode"] == 409
+
+    def test_create_request_rejects_nan_coordinates(self):
+        body = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "FLOOD",
+            "description": "NaN coordinate request",
+            "peopleCount": 1,
+            "latitude": float("nan"),
+            "longitude": 100.5018,
+            "contactName": "NaN User",
+            "contactPhone": _random_phone(),
+            "sourceChannel": "WEB",
+        }
+        response = create_handler(self._build_event(body), None)
+        assert response["statusCode"] == 422
+
+    def test_create_request_rejects_invalid_enums(self):
+        body = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "NOT_A_REAL_TYPE",
+            "description": "Invalid request type",
+            "peopleCount": 1,
+            "latitude": 13.7563,
+            "longitude": 100.5018,
+            "contactName": "Enum User",
+            "contactPhone": _random_phone(),
+            "sourceChannel": "UNKNOWN",
+        }
+        response = create_handler(self._build_event(body), None)
+        assert response["statusCode"] == 422
+
+    def test_create_request_rejects_people_count_outside_dynamodb_limit(self):
+        body = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "FLOOD",
+            "description": "Huge people count",
+            "peopleCount": int("9" * 39),
+            "latitude": 13.7563,
+            "longitude": 100.5018,
+            "contactName": "Huge Count User",
+            "contactPhone": _random_phone(),
+            "sourceChannel": "WEB",
+        }
+        response = create_handler(self._build_event(body), None)
+        assert response["statusCode"] == 422
