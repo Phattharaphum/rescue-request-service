@@ -1,9 +1,10 @@
 from src.application.usecases import list_citizen_updates
-from src.handlers.handler_utils import get_path_param, get_query_param, handle_error
+from src.handlers.handler_utils import cors_handler, get_path_param, get_query_param, handle_error
 from src.shared.response import ok
 from src.shared.validators import validate_pagination
 
 
+@cors_handler
 def handler(event, context):
     try:
         request_id = get_path_param(event, "requestId")
@@ -21,4 +22,5 @@ def handler(event, context):
         )
         return ok(result)
     except Exception as e:
-        return handle_error(e)
+        return handle_error(e, event)
+

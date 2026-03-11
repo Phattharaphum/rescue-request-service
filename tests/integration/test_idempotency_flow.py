@@ -17,6 +17,10 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
 from src.handlers.public.create_rescue_request import handler as create_handler
 
 
+def _random_phone() -> str:
+    return "08" + str(uuid.uuid4().int % 10**8).zfill(8)
+
+
 def _create_tables():
     dynamodb = boto3.client("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
     tables = dynamodb.list_tables()["TableNames"]
@@ -80,7 +84,7 @@ class TestIdempotencyFlow:
             "latitude": 13.7563,
             "longitude": 100.5018,
             "contactName": "Idem User",
-            "contactPhone": "0811111111",
+            "contactPhone": _random_phone(),
             "sourceChannel": "WEB",
         }
 
@@ -104,7 +108,7 @@ class TestIdempotencyFlow:
             "latitude": 13.7563,
             "longitude": 100.5018,
             "contactName": "User",
-            "contactPhone": "0822222222",
+            "contactPhone": _random_phone(),
             "sourceChannel": "WEB",
         }
         body2 = dict(body1)

@@ -1,11 +1,33 @@
 import json
+from functools import wraps
 from typing import Any
 
 from src.shared.errors import AppError
 from src.shared.logger import get_logger
-from src.shared.response import bad_request, conflict, forbidden, internal_error, not_found, service_unavailable, unprocessable_entity
+from src.shared.response import (
+    apply_cors_headers,
+    bad_request,
+    conflict,
+    default_headers,
+    forbidden,
+    internal_error,
+    not_found,
+    service_unavailable,
+    unprocessable_entity,
+)
 
 logger = get_logger(__name__)
+
+
+def cors_handler(func):
+    @wraps(func)
+    def wrapper(event, context):
+        response = func(event, context)
+        if isinstance(response, dict) and "statusCode" in response:
+            return apply_cors_headers(response, event)
+        return response
+
+    return wrapper
 
 
 def parse_body(event: dict) -> dict:
@@ -38,7 +60,7 @@ def get_header(event: dict, name: str, default: str | None = None) -> str | None
     return default
 
 
-def handle_error(e: Exception) -> dict[str, Any]:
+def handle_error(e: Exception, event: dict[str, Any] | None = None) -> dict[str, Any]:
     if isinstance(e, AppError):
         status = e.status_code
         body = {
@@ -50,8 +72,8 @@ def handle_error(e: Exception) -> dict[str, Any]:
         body["traceId"] = str(uuid.uuid4())
         return {
             "statusCode": status,
-            "headers": {"Content-Type": "application/json"},
+            "headers": default_headers(event),
             "body": json.dumps(body, default=str),
         }
     logger.exception("Unhandled error")
-    return internal_error()
+    return internal_error(event=event)

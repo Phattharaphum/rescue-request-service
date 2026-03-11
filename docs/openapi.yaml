@@ -107,9 +107,12 @@ paths:
         The service returns a `trackingCode` that the citizen can later use together with
         their phone number to look up the status of their request.
 
-        **Duplicate detection** â€” if a request with the same incident, phone number, request
-        type, approximate location, and submission time (within a 5-minute window) already
-        exists, a `409 Conflict` is returned instead of creating a new record.
+        **Phone uniqueness** â€” if `contactPhone` already exists on any prior request,
+        a `409 Conflict` is returned and a new request is not created.
+
+        **Duplicate detection** â€” additionally, if a request with the same incident, phone
+        number, request type, approximate location, and submission time (within a 5-minute
+        window) already exists, a `409 Conflict` is returned.
 
         Idempotency is supported via `X-Idempotency-Key`.
       parameters:
@@ -199,7 +202,8 @@ paths:
       operationId: getCitizenStatus
       summary: Get the current status of a rescue request (citizen view)
       description: |
-        Returns a simplified status summary intended for display to the citizen.
+        Returns a detailed, citizen-facing status snapshot intended for request tracking.
+        Includes latest state, key request details, and recent status events.
         This endpoint does not require authentication.
       parameters:
         - $ref: '#/components/parameters/RequestId'
@@ -212,11 +216,63 @@ paths:
                 $ref: '#/components/schemas/CitizenStatusResponse'
               example:
                 requestId: "550e8400-e29b-41d4-a716-446655440000"
+                incidentId: "INC-2024-001"
+                requestType: "FLOOD"
                 status: "ASSIGNED"
+                statusMessage: "มีการมอบหมายหน่วยช่วยเหลือแล้ว กรุณาติดตามการอัปเดตล่าสุด"
+                nextSuggestedAction: "เตรียมพร้อมรับการติดต่อจากหน่วยช่วยเหลือ"
+                description: "Water level rising rapidly, 5 people trapped on second floor"
+                peopleCount: 5
+                specialNeeds: "Elderly person, needs wheelchair"
+                submittedAt: "2024-01-15T10:30:00.000000+00:00"
+                lastCitizenUpdateAt: "2024-01-15T10:45:00.000000+00:00"
+                contactName: "Somchai Jaidee"
+                contactPhoneMasked: "081****678"
+                location:
+                  latitude: 13.7563
+                  longitude: 100.5018
+                  locationDetails: "Yellow house next to the big banyan tree"
+                  addressLine: "123 Silom Road"
+                  province: "Bangkok"
+                  district: "Bang Rak"
+                  subdistrict: "Bang Rak"
                 priorityLevel: "HIGH"
                 assignedUnitId: "UNIT-007"
+                assignedAt: "2024-01-15T11:00:00.000000+00:00"
+                latestNote: "Forwarded to responder unit"
                 lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
                 stateVersion: 3
+                latestEvent:
+                  eventId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                  version: 3
+                  previousStatus: "TRIAGED"
+                  newStatus: "ASSIGNED"
+                  occurredAt: "2024-01-15T11:00:00.000000+00:00"
+                  changeReason: null
+                  meta:
+                    dispatchChannel: "RADIO"
+                  priorityScore: 85.5
+                  responderUnitId: "UNIT-007"
+                recentEvents:
+                  - eventId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    version: 3
+                    previousStatus: "TRIAGED"
+                    newStatus: "ASSIGNED"
+                    occurredAt: "2024-01-15T11:00:00.000000+00:00"
+                    changeReason: null
+                    meta:
+                      dispatchChannel: "RADIO"
+                    priorityScore: 85.5
+                    responderUnitId: "UNIT-007"
+                  - eventId: "b7de6a65-4e4a-46d9-a7f7-540f080f1dd7"
+                    version: 2
+                    previousStatus: "SUBMITTED"
+                    newStatus: "TRIAGED"
+                    occurredAt: "2024-01-15T10:40:00.000000+00:00"
+                    changeReason: "Initial triage"
+                    meta: null
+                    priorityScore: 75.0
+                    responderUnitId: null
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -236,6 +292,7 @@ paths:
         (`RESOLVED` or `CANCELLED`).
 
         Idempotency is supported via `X-Idempotency-Key`.
+        `updatePayload` is validated according to `updateType`.
       parameters:
         - $ref: '#/components/parameters/RequestId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -248,6 +305,7 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateCitizenUpdateBody'
             example:
+              trackingCode: "123456"
               updateType: "PEOPLE_COUNT"
               updatePayload:
                 peopleCount: 7
@@ -265,6 +323,8 @@ paths:
                 createdAt: "2024-01-15T10:45:00.000000+00:00"
         '404':
           $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -297,6 +357,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListCitizenUpdatesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -310,8 +374,11 @@ paths:
       operationId: getRescueRequest
       summary: Get full details of a rescue request
       description: |
-        Retrieves the master record and current state of a rescue request.
-        Optionally includes the full status-event history and citizen-submitted updates.
+        Retrieves full details of a rescue request.
+        `master` represents the original first report and is not overwritten by citizen updates.
+        `updateItems` lists all citizen-submitted update payloads.
+        `currentState` is the latest operational state snapshot.
+        Optionally includes the full status-event history.
       parameters:
         - $ref: '#/components/parameters/RequestId'
         - name: includeEvents
@@ -1098,9 +1165,15 @@ components:
     CreateCitizenUpdateBody:
       type: object
       required:
+        - trackingCode
         - updateType
         - updatePayload
       properties:
+        trackingCode:
+          type: string
+          description: Tracking code for authorizing this citizen update
+          pattern: "^[0-9]{6}$"
+          example: "123456"
         updateType:
           $ref: '#/components/schemas/UpdateType'
         updatePayload:
@@ -1274,8 +1347,70 @@ components:
         requestId:
           type: string
           format: uuid
+        incidentId:
+          type: string
+        requestType:
+          $ref: '#/components/schemas/RequestType'
         status:
           $ref: '#/components/schemas/RequestStatus'
+        statusMessage:
+          type: string
+          nullable: true
+          description: Citizen-friendly status description
+        nextSuggestedAction:
+          type: string
+          nullable: true
+          description: Suggested next action for the citizen
+        description:
+          type: string
+          nullable: true
+        peopleCount:
+          type: integer
+          nullable: true
+        specialNeeds:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCitizenUpdateAt:
+          type: string
+          format: date-time
+          nullable: true
+        contactName:
+          type: string
+          nullable: true
+        contactPhoneMasked:
+          type: string
+          nullable: true
+          description: Masked contact phone number for privacy
+        location:
+          type: object
+          properties:
+            latitude:
+              type: number
+              format: double
+              nullable: true
+            longitude:
+              type: number
+              format: double
+              nullable: true
+            locationDetails:
+              type: string
+              nullable: true
+            addressLine:
+              type: string
+              nullable: true
+            province:
+              type: string
+              nullable: true
+            district:
+              type: string
+              nullable: true
+            subdistrict:
+              type: string
+              nullable: true
         priorityLevel:
           type: string
           nullable: true
@@ -1284,6 +1419,14 @@ components:
           type: string
           nullable: true
           description: ID of the responding unit, if assigned
+        assignedAt:
+          type: string
+          format: date-time
+          nullable: true
+        latestNote:
+          type: string
+          nullable: true
+          description: Latest staff note visible to citizen tracking
         lastUpdatedAt:
           type: string
           format: date-time
@@ -1291,6 +1434,43 @@ components:
         stateVersion:
           type: integer
           description: Monotonically increasing version of the current state
+        latestEvent:
+          $ref: '#/components/schemas/CitizenStatusEventItem'
+        recentEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitizenStatusEventItem'
+
+    CitizenStatusEventItem:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        previousStatus:
+          $ref: '#/components/schemas/RequestStatus'
+          nullable: true
+        newStatus:
+          $ref: '#/components/schemas/RequestStatus'
+        occurredAt:
+          type: string
+          format: date-time
+        changeReason:
+          type: string
+          nullable: true
+        meta:
+          type: object
+          nullable: true
+          additionalProperties: true
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+        responderUnitId:
+          type: string
+          nullable: true
 
     CreateCitizenUpdateResponse:
       type: object
@@ -1349,6 +1529,11 @@ components:
         currentState:
           $ref: '#/components/schemas/CurrentStateResponse'
           nullable: true
+        updateItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitizenUpdateItem'
+          description: Citizen-submitted updates (newest/oldest order by storage key)
         events:
           type: array
           items:
@@ -1358,7 +1543,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CitizenUpdateItem'
-          description: Present only when `includeCitizenUpdates=true`
+          description: Backward-compatible alias of `updateItems` when `includeCitizenUpdates=true`
 
     RescueRequestMaster:
       type: object
@@ -1600,7 +1785,6 @@ components:
           nullable: true
           description: SHA-256 fingerprint of the original request body (present when `includeRequestFingerprint=true`)
 
-    # â”€â”€ Error Schemas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     ErrorResponse:
       type: object
@@ -1629,9 +1813,20 @@ components:
                 description: Description of the problem
                 example: "must be a valid phone number (10-15 digits)"
 
-  # â”€â”€ Reusable Responses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
   responses:
+
+    BadRequest:
+      description: The request format or query parameters are invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "since must be a valid ISO-8601 datetime"
+            traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            details: []
 
     NotFound:
       description: The requested resource does not exist

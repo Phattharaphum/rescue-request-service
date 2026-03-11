@@ -23,6 +23,10 @@ from src.handlers.public.create_rescue_request import handler as create_handler
 from src.handlers.staff.get_current_state import handler as get_current_handler
 
 
+def _random_phone() -> str:
+    return "08" + str(uuid.uuid4().int % 10**8).zfill(8)
+
+
 def _create_tables():
     dynamodb = boto3.client("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
     tables = dynamodb.list_tables()["TableNames"]
@@ -71,7 +75,7 @@ def _create_request() -> str:
         "latitude": 13.7563,
         "longitude": 100.5018,
         "contactName": "Transition User",
-        "contactPhone": "0833333333",
+        "contactPhone": _random_phone(),
         "sourceChannel": "WEB",
     }
     event = {

@@ -3,6 +3,12 @@ Transform: AWS::Serverless-2016-10-31
 Description: Rescue Request Service - Local Development
 
 Globals:
+  Api:
+    Cors:
+      AllowOrigin: "'*'"
+      AllowHeaders: "'Content-Type,X-Trace-Id,X-Idempotency-Key,If-Match,Authorization'"
+      AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+
   Function:
     Runtime: python3.11
     Timeout: 30
@@ -12,11 +18,46 @@ Globals:
         STAGE: local
         DYNAMODB_TABLE_NAME: RescueRequestTable
         IDEMPOTENCY_TABLE_NAME: IdempotencyTable
-        SNS_TOPIC_ARN: ""
+        SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
+        ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: DEBUG
         DYNAMODB_ENDPOINT: http://localstack:4566
 
 Resources:
+  RescueRequestEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: rescue-request-events-v1
+
+  RescueRequestEventsStreamQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: rescue-request-events-v1-stream
+
+  RescueRequestEventsStreamQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref RescueRequestEventsStreamQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSnsPublish
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt RescueRequestEventsStreamQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RescueRequestEventsTopic
+
+  RescueRequestEventsStreamSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref RescueRequestEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt RescueRequestEventsStreamQueue.Arn
+
   CreateRescueRequestFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -220,4 +261,9 @@ Resources:
           Properties:
             Path: /v1/rescue-requests/{requestId}/cancel
             Method: POST
+
+Outputs:
+  SQSQueueUrl:
+    Description: Local SQS queue URL subscribed to rescue request events topic
+    Value: !Ref RescueRequestEventsStreamQueue
 

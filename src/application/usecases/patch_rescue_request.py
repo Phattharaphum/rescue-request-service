@@ -58,7 +58,12 @@ def execute(request_id: str, body: dict, idempotency_key: str | None = None, exp
         )
 
     try:
-        publish_citizen_updated(request_id=request_id, update_id="patch", update_type="PATCH")
+        publish_citizen_updated(
+            request_id=request_id,
+            update_id="patch",
+            update_type="PATCH",
+            update_payload=updates,
+        )
     except Exception:
         logger.exception("Failed to publish citizen-updated event")
 

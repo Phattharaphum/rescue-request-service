@@ -35,10 +35,23 @@ def publish_status_changed(
     )
 
 
-def publish_citizen_updated(request_id: str, update_id: str, update_type: str, correlation_id: str | None = None) -> None:
+def publish_citizen_updated(
+    request_id: str,
+    update_id: str,
+    update_type: str,
+    correlation_id: str | None = None,
+    update_payload: dict | None = None,
+    created_at: str | None = None,
+) -> None:
+    body = {"requestId": request_id, "updateId": update_id, "updateType": update_type}
+    if update_payload is not None:
+        body["updatePayload"] = update_payload
+    if created_at is not None:
+        body["createdAt"] = created_at
+
     publish_event(
         event_type="rescue-request.citizen-updated",
-        body={"requestId": request_id, "updateId": update_id, "updateType": update_type},
+        body=body,
         partition_key=request_id,
         correlation_id=correlation_id,
     )

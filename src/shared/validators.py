@@ -1,4 +1,5 @@
 import re
+import math
 import uuid as uuid_module
 from typing import Any
 
@@ -23,7 +24,7 @@ def validate_uuid(value: str, field_name: str = "id") -> str:
 
 def validate_phone(phone: str) -> list[dict[str, str]]:
     errors = []
-    if not phone or not re.match(r"^[\d\+\-\s\(\)]{7,20}$", phone):
+    if not isinstance(phone, str) or not phone or not re.match(r"^[\d\+\-\s\(\)]{7,20}$", phone):
         errors.append({"field": "contactPhone", "issue": "invalid phone number format"})
     return errors
 
@@ -32,6 +33,9 @@ def validate_latitude(lat: Any) -> list[dict[str, str]]:
     errors = []
     try:
         lat_f = float(lat)
+        if not math.isfinite(lat_f):
+            errors.append({"field": "latitude", "issue": "must be a finite number"})
+            return errors
         if lat_f < -90 or lat_f > 90:
             errors.append({"field": "latitude", "issue": "must be between -90 and 90"})
     except (TypeError, ValueError):
@@ -43,6 +47,9 @@ def validate_longitude(lon: Any) -> list[dict[str, str]]:
     errors = []
     try:
         lon_f = float(lon)
+        if not math.isfinite(lon_f):
+            errors.append({"field": "longitude", "issue": "must be a finite number"})
+            return errors
         if lon_f < -180 or lon_f > 180:
             errors.append({"field": "longitude", "issue": "must be between -180 and 180"})
     except (TypeError, ValueError):

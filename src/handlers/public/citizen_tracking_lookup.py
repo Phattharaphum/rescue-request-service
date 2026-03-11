@@ -1,8 +1,9 @@
 from src.application.usecases import citizen_tracking_lookup
-from src.handlers.handler_utils import handle_error, parse_body
+from src.handlers.handler_utils import cors_handler, handle_error, parse_body
 from src.shared.response import ok
 
 
+@cors_handler
 def handler(event, context):
     try:
         body = parse_body(event)
@@ -12,4 +13,5 @@ def handler(event, context):
         )
         return ok(result)
     except Exception as e:
-        return handle_error(e)
+        return handle_error(e, event)
+

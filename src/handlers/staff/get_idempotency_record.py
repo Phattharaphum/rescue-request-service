@@ -1,8 +1,9 @@
 from src.application.usecases import get_idempotency_record
-from src.handlers.handler_utils import get_path_param, get_query_param, handle_error
+from src.handlers.handler_utils import cors_handler, get_path_param, get_query_param, handle_error
 from src.shared.response import ok
 
 
+@cors_handler
 def handler(event, context):
     try:
         key_hash = get_path_param(event, "idempotencyKeyHash")
@@ -16,4 +17,5 @@ def handler(event, context):
         )
         return ok(result)
     except Exception as e:
-        return handle_error(e)
+        return handle_error(e, event)
+
