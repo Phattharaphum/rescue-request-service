@@ -9,6 +9,7 @@ region = "ap-southeast-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 parameter_overrides = "Stage=dev"
+resolve_s3 = true
 
 [prod.deploy.parameters]
 stack_name = "rescue-request-service-prod"
@@ -16,3 +17,4 @@ region = "ap-southeast-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 parameter_overrides = "Stage=prod"
+resolve_s3 = true

@@ -5,7 +5,7 @@ Description: Rescue Request Service - Local Development
 Globals:
   Api:
     Cors:
-      AllowOrigin: "'https://rescue-request.phatphum.me'"
+      AllowOrigin: "'*'"
       AllowHeaders: "'Content-Type,X-Trace-Id,X-Idempotency-Key,If-Match,Authorization'"
       AllowMethods: "'GET,POST,PATCH,OPTIONS'"
 
@@ -19,6 +19,7 @@ Globals:
         DYNAMODB_TABLE_NAME: RescueRequestTable
         IDEMPOTENCY_TABLE_NAME: IdempotencyTable
         SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
+        ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: DEBUG
         DYNAMODB_ENDPOINT: http://localstack:4566
 

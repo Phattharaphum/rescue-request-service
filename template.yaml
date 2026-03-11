@@ -19,6 +19,7 @@ Globals:
         DYNAMODB_TABLE_NAME: !Ref RescueRequestTable
         IDEMPOTENCY_TABLE_NAME: !Ref IdempotencyTable
         SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
+        ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: INFO
 
 Resources:
@@ -50,6 +51,25 @@ Resources:
       KeySchema:
         - AttributeName: idempotencyKeyHash
           KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  StreamEventLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "RescueRequestStreamEventLog-${Stage}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: streamKey
+          AttributeType: S
+        - AttributeName: eventKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: streamKey
+          KeyType: HASH
+        - AttributeName: eventKey
+          KeyType: RANGE
       TimeToLiveSpecification:
         AttributeName: expiresAt
         Enabled: true
@@ -96,7 +116,7 @@ Resources:
       StageName: !Ref Stage
       TracingEnabled: true
       Cors:
-        AllowOrigin: "'https://rescue-request.phatphum.me'"
+        AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type,X-Trace-Id,X-Idempotency-Key,If-Match,Authorization'"
         AllowMethods: "'GET,POST,PATCH,OPTIONS'"
 
@@ -411,6 +431,74 @@ Resources:
             Path: /v1/rescue-requests/{requestId}/cancel
             Method: POST
 
+  StreamPollerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs20.x
+      Handler: src/poller.handler
+      CodeUri: stream-service/
+      Timeout: 60
+      Environment:
+        Variables:
+          SNS_STREAM_SQS_QUEUE_URL: !Ref RescueRequestEventsStreamQueue
+          STREAM_TABLE_NAME: !Ref StreamEventLogTable
+          STREAM_KEY: STREAM
+          POLLER_LOCK_KEY: POLLER
+          POLLER_LEASE_MS: "55000"
+          EVENT_RETENTION_SECONDS: "86400"
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt RescueRequestEventsStreamQueue.QueueName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StreamEventLogTable
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled: true
+
+  StreamSseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs20.x
+      Handler: src/stream.handler
+      CodeUri: stream-service/
+      Timeout: 900
+      Environment:
+        Variables:
+          STREAM_TABLE_NAME: !Ref StreamEventLogTable
+          STREAM_KEY: STREAM
+          ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
+          HEARTBEAT_MS: "15000"
+          POLL_INTERVAL_MS: "1000"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref StreamEventLogTable
+
+  StreamSseFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt StreamSseFunction.Arn
+      AuthType: NONE
+      InvokeMode: RESPONSE_STREAM
+
+  StreamSseFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref StreamSseFunction
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  StreamSseFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref StreamSseFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
@@ -427,5 +515,11 @@ Outputs:
   SQSQueueUrl:
     Description: SQS queue URL subscribed to rescue request events topic
     Value: !Ref RescueRequestEventsStreamQueue
+  StreamServiceSseUrl:
+    Description: SSE endpoint for the static frontend
+    Value: !Join
+      - ""
+      - - !GetAtt StreamSseFunctionUrl.FunctionUrl
+        - stream
 
 

@@ -2,11 +2,12 @@ from src.application.services.event_publisher import publish_cancelled, publish_
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
 from src.application.services.state_transition_service import execute_transition
 from src.domain.enums.request_status import RequestStatus
-from src.handlers.handler_utils import get_header, get_path_param, handle_error, parse_body
+from src.handlers.handler_utils import cors_handler, get_header, get_path_param, handle_error, parse_body
 from src.shared.response import ok
 import json
 
 
+@cors_handler
 def handler(event, context):
     try:
         request_id = get_path_param(event, "requestId")
@@ -45,4 +46,5 @@ def handler(event, context):
 
         return ok(result)
     except Exception as e:
-        return handle_error(e)
+        return handle_error(e, event)
+

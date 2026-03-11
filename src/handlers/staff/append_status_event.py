@@ -1,8 +1,9 @@
 from src.application.usecases import append_status_event
-from src.handlers.handler_utils import get_header, get_path_param, handle_error, parse_body
+from src.handlers.handler_utils import cors_handler, get_header, get_path_param, handle_error, parse_body
 from src.shared.response import ok
 
 
+@cors_handler
 def handler(event, context):
     try:
         request_id = get_path_param(event, "requestId")
@@ -19,4 +20,5 @@ def handler(event, context):
         )
         return ok(result)
     except Exception as e:
-        return handle_error(e)
+        return handle_error(e, event)
+

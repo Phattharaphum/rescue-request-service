@@ -1,8 +1,9 @@
 from src.application.usecases import create_citizen_update
-from src.handlers.handler_utils import get_header, get_path_param, handle_error, parse_body
+from src.handlers.handler_utils import cors_handler, get_header, get_path_param, handle_error, parse_body
 from src.shared.response import created
 
 
+@cors_handler
 def handler(event, context):
     try:
         request_id = get_path_param(event, "requestId")
@@ -20,4 +21,5 @@ def handler(event, context):
         )
         return created(result)
     except Exception as e:
-        return handle_error(e)
+        return handle_error(e, event)
+
