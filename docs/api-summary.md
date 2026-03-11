@@ -1,6 +1,6 @@
 ﻿# API Reference
 
-**Base URL:** `https://{apiId}.execute-api.{region}.amazonaws.com/{stage}/v1`
+**Base URL:** `https://t8syiso74e.execute-api.ap-southeast-2.amazonaws.com/dev/v1/`
 
 A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml`](openapi.yaml).
 
@@ -57,10 +57,12 @@ The Rescue Request Service provides a REST API for managing disaster rescue requ
 | Header | Direction | Description |
 |--------|-----------|-------------|
 | `X-Idempotency-Key` | Request | UUID v4. Makes mutating operations safe to retry. Optional on all mutating endpoints. |
-| `If-Match` | Request | Current `stateVersion` integer. Used for optimistic concurrency control on write operations. Returns `409` on mismatch. |
+| `If-Match` | Request | Current `stateVersion` integer. Enforced on `POST /rescue-requests/{requestId}/events` and command endpoints. `PATCH /rescue-requests/{requestId}` currently accepts the header but does not enforce version checks. |
 | `X-Forwarded-For` | Request | Client IP, set automatically by API Gateway. |
 | `User-Agent` | Request | Client user-agent string. |
 | `X-Trace-Id` | Response | UUID included in every response for request tracing. |
+| `Access-Control-Allow-Origin` | Response | Reflected when the request `Origin` is one of: `https://rescue-request.phatphum.me`, `http://localhost:3000` |
+| `Vary` | Response | Always `Origin` on application responses |
 
 ---
 
@@ -95,7 +97,7 @@ All errors share the same JSON structure:
   "message": "Human-readable description",
   "traceId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "details": [
-    { "field": "contactPhone", "issue": "must be a valid phone number (10-15 digits)" }
+    { "field": "contactPhone", "issue": "invalid phone number format" }
   ]
 }
 ```
@@ -103,14 +105,11 @@ All errors share the same JSON structure:
 | HTTP Status | Error Code | When |
 |-------------|------------|------|
 | `400` | `BAD_REQUEST` | Malformed request |
-| `401` | `UNAUTHORIZED` | Missing or invalid credentials |
 | `403` | `FORBIDDEN` | Phone + tracking code combination is invalid |
 | `404` | `NOT_FOUND` | Resource does not exist |
 | `409` | `CONFLICT` | Invalid state transition / version mismatch / duplicate / idempotency key reused with different payload |
 | `422` | `VALIDATION_ERROR` | Input validation failure (see `details`) |
-| `429` | `TOO_MANY_REQUESTS` | Rate limit exceeded |
 | `500` | `INTERNAL_ERROR` | Unexpected server error |
-| `503` | `SERVICE_UNAVAILABLE` | Downstream dependency unavailable |
 
 ---
 
@@ -175,7 +174,7 @@ the same incident, phone, request type, approximate location, and submission tim
 | Body | `latitude` | number [-90, 90] | **Yes** | GPS latitude |
 | Body | `longitude` | number [-180, 180] | **Yes** | GPS longitude |
 | Body | `contactName` | string | **Yes** | Primary contact's full name |
-| Body | `contactPhone` | string (10–15 digits) | **Yes** | Contact phone number |
+| Body | `contactPhone` | string (7-20 chars) | **Yes** | Contact phone number. Current validation accepts digits, spaces, `+`, `-`, and parentheses. |
 | Body | `sourceChannel` | SourceChannel | **Yes** | Submission channel |
 | Body | `specialNeeds` | string \| null | No | Medical/mobility requirements |
 | Body | `locationDetails` | string \| null | No | Additional location hints |
@@ -418,7 +417,7 @@ Returns a paginated list of all citizen-submitted updates for a rescue request.
 |-----------|------|---------|-------------|
 | `limit` | integer | 20 | Max results (1–100) |
 | `cursor` | string | — | Pagination cursor |
-| `since` | ISO-8601 | — | Only return updates after this timestamp |
+| `since` | ISO-8601 | — | Only return updates created at or after this timestamp |
 
 #### Response `200 OK`
 
@@ -532,7 +531,7 @@ Cannot be called when the request is in a terminal state.
 |----------|-------|------|----------|-------------|
 | Path | `requestId` | UUID | **Yes** | |
 | Header | `X-Idempotency-Key` | UUID | No | Idempotency key |
-| Header | `If-Match` | integer | No | Expected `stateVersion` for optimistic locking |
+| Header | `If-Match` | integer | No | Accepted for forward compatibility, but the current PATCH implementation does not enforce version matching |
 | Body | (any allowed field) | — | — | At least one field is required |
 
 **Example request body:**
@@ -552,7 +551,10 @@ Cannot be called when the request is in a terminal state.
 }
 ```
 
-**Error responses:** `404`, `409` (terminal state or version mismatch), `422`
+`PATCH /rescue-requests/{requestId}` currently also publishes a `rescue-request.citizen-updated`
+SNS event with `updateType: "PATCH"` and `updateId: "patch"`.
+
+**Error responses:** `404`, `409` (terminal state / idempotency conflict), `422`
 
 ---
 
@@ -566,7 +568,7 @@ Returns a paginated list of status-change events for a rescue request.
 |-----------|------|---------|-------------|
 | `limit` | integer | 20 | Max results (1–100) |
 | `cursor` | string | — | Pagination cursor |
-| `sinceVersion` | integer | — | Only return events with version > this value |
+| `sinceVersion` | integer | — | Only return events with version >= this value |
 | `order` | `ASC` \| `DESC` | `ASC` | Sort order |
 
 #### Response `200 OK`
@@ -610,9 +612,8 @@ dedicated [Command Endpoints](#8-command-endpoints-state-machine).
 | Body | `newStatus` | RequestStatus | **Yes** | Target status |
 | Body | `changedBy` | string | **Yes** | Staff member identifier |
 | Body | `changedByRole` | string | **Yes** | Staff member role |
-| Body | `changeReason` | string \| null | No | Free-text reason |
+| Body | `reason` | string \| null | No | Stored on the event as `changeReason`; required when `newStatus=CANCELLED` |
 | Body | `responderUnitId` | string \| null | No | Required when `newStatus=ASSIGNED` |
-| Body | `reason` | string \| null | No | Required when `newStatus=CANCELLED` |
 | Body | `priorityScore` | number \| null | No | Numerical priority score |
 | Body | `priorityLevel` | string \| null | No | Human-readable priority label |
 | Body | `note` | string \| null | No | Operational note |
@@ -624,7 +625,7 @@ dedicated [Command Endpoints](#8-command-endpoints-state-machine).
   "newStatus": "TRIAGED",
   "changedBy": "staff-001",
   "changedByRole": "dispatcher",
-  "changeReason": "Request verified, forwarding to field team"
+  "reason": "Request verified, forwarding to field team"
 }
 ```
 
@@ -663,7 +664,9 @@ Returns the latest state snapshot for a rescue request.
 
 ### 7.6 GET /incidents/{incidentId}/rescue-requests
 
-Returns a paginated list of rescue request summaries for the given incident.
+Returns a paginated list of rescue requests for the given incident.
+Each item is the master request record enriched with the latest `status` and a
+`currentState` snapshot.
 
 #### Query Parameters
 
@@ -671,7 +674,7 @@ Returns a paginated list of rescue request summaries for the given incident.
 |-----------|------|---------|-------------|
 | `limit` | integer | 20 | Max results (1–100) |
 | `cursor` | string | — | Pagination cursor |
-| `status` | RequestStatus | — | Filter by status |
+| `status` | RequestStatus | — | Filter by latest `currentState.status` when available |
 
 #### Response `200 OK`
 
@@ -683,8 +686,35 @@ Returns a paginated list of rescue request summaries for the given incident.
       "incidentId": "INC-2024-001",
       "status": "ASSIGNED",
       "requestType": "FLOOD",
+      "description": "Water level rising rapidly, 5 people trapped on second floor",
+      "peopleCount": 5,
+      "specialNeeds": "Elderly person, needs wheelchair",
+      "latitude": 13.7563,
+      "longitude": 100.5018,
+      "locationDetails": "Yellow house next to the big banyan tree",
+      "province": "Bangkok",
+      "district": "Bang Rak",
+      "subdistrict": "Bang Rak",
+      "addressLine": "123 Silom Road",
       "contactName": "Somchai Jaidee",
-      "submittedAt": "2024-01-15T10:30:00.000000+00:00"
+      "contactPhone": "0812345678",
+      "sourceChannel": "MOBILE",
+      "submittedAt": "2024-01-15T10:30:00.000000+00:00",
+      "lastCitizenUpdateAt": "2024-01-15T10:45:00.000000+00:00",
+      "currentState": {
+        "requestId": "550e8400-e29b-41d4-a716-446655440000",
+        "incidentId": "INC-2024-001",
+        "lastEventId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "stateVersion": 3,
+        "status": "ASSIGNED",
+        "priorityScore": 85.5,
+        "priorityLevel": "HIGH",
+        "assignedUnitId": "UNIT-007",
+        "assignedAt": "2024-01-15T11:00:00.000000+00:00",
+        "latestNote": "Team dispatched, ETA 15 minutes",
+        "lastUpdatedBy": "dispatcher-01",
+        "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+      }
     }
   ],
   "nextCursor": null
@@ -890,22 +920,30 @@ Attempting to transition from a terminal state (`RESOLVED` or `CANCELLED`) also 
 
 **Topic:** `rescue-request-events-v1-{stage}`
 
-All events are wrapped in the following envelope:
+> **Internal stream relay:** The deployed `/stream` Lambda / Function URL is an internal relay for the first-party frontend only and is not part of the public REST API contract.
+> External systems that need pub/sub delivery should subscribe to the SNS topic directly, or attach their own SQS subscription, instead of depending on the internal stream Lambda.
+
+Raw SNS messages are wrapped in the following envelope:
 
 ```json
 {
-  "metadata": {
+  "header": {
+    "messageId": "uuid",
     "eventType": "rescue-request.status-changed",
-    "eventId": "uuid",
-    "timestamp": "2024-01-15T10:35:00.000000+00:00",
-    "partitionKey": "550e8400-e29b-41d4-a716-446655440000",
     "schemaVersion": "1.0",
-    "source": "rescue-request-service",
-    "correlationId": "optional-trace-id"
+    "producer": "rescue-request-service",
+    "occurredAt": "2024-01-15T10:35:00.000000+00:00",
+    "traceId": "uuid",
+    "correlationId": "uuid",
+    "partitionKey": "550e8400-e29b-41d4-a716-446655440000",
+    "contentType": "application/json"
   },
   "body": { }
 }
 ```
+
+The internal `/stream` relay may normalize or repackage events for SSE delivery.
+That relay shape is internal-only and should not be treated as a public contract.
 
 **SNS Message Attributes** (usable for subscription filters):
 
@@ -919,9 +957,9 @@ All events are wrapped in the following envelope:
 
 | Event Type | Trigger | `body` Fields |
 |------------|---------|--------------|
-| `rescue-request.created` | New request created | `requestId`, `data` (master record) |
+| `rescue-request.created` | New request created | `requestId`, `data` (current implementation publishes the full persisted master item, including internal storage fields) |
 | `rescue-request.status-changed` | Any state transition | `requestId`, `previousStatus`, `newStatus`, `eventId`, `version` |
-| `rescue-request.citizen-updated` | Citizen submits an update | `requestId`, `updateId`, `updateType`, `updatePayload`, `createdAt` |
+| `rescue-request.citizen-updated` | Citizen submits an update, or staff PATCH edits the master record | Citizen update: `requestId`, `updateId`, `updateType`, `updatePayload`, `createdAt`; PATCH: `requestId`, `updateId="patch"`, `updateType="PATCH"`, `updatePayload` |
 | `rescue-request.resolved` | Request resolved | `requestId`, `eventId` |
 | `rescue-request.cancelled` | Request cancelled | `requestId`, `eventId`, `reason` |
 

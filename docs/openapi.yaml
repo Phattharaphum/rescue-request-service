@@ -16,17 +16,17 @@ info:
     |-------|-----------|----------|
     | Public | `/v1` | Citizens (no authentication required) |
     | Staff | `/v1` | Emergency-response staff |
-    | Commands | `/v1` | Staff â€” state-machine transitions |
+    | Commands | `/v1` | Staff - state-machine transitions |
 
     ## State Machine
 
     ```
-    SUBMITTED â†’ TRIAGED â†’ ASSIGNED â†’ IN_PROGRESS â†’ RESOLVED
-        â”‚           â”‚          â”‚            â”‚
-        â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â–¶ CANCELLED
+    SUBMITTED -> TRIAGED -> ASSIGNED -> IN_PROGRESS -> RESOLVED
+        |           |          |            |
+        +-----------+----------+------------+--> CANCELLED
     ```
 
-    * **Terminal states**: `RESOLVED`, `CANCELLED` â€” no further transitions are allowed.
+    * **Terminal states**: `RESOLVED`, `CANCELLED` - no further transitions are allowed.
     * `ASSIGNED` requires a `responderUnitId` in the request body.
     * `CANCELLED` requires a `reason` in the request body.
 
@@ -48,8 +48,8 @@ info:
 
     | Parameter | Type | Default | Limits |
     |-----------|------|---------|--------|
-    | `limit` | integer | 20 | 1 â€“ 100 |
-    | `cursor` | string | â€” | Base64-encoded token from previous response |
+    | `limit` | integer | 20 | 1-100 |
+    | `cursor` | string | - | Base64-encoded token from previous response |
 
     ## Error Format
 
@@ -64,6 +64,30 @@ info:
       ]
     }
     ```
+
+    ## CORS
+
+    Application responses reflect the request `Origin` when it is one of:
+    - `https://rescue-request.phatphum.me`
+    - `http://localhost:3000`
+
+    REST API preflight is handled by API Gateway, while application responses include
+    `Access-Control-Allow-Origin` and `Vary: Origin`.
+
+    ## Internal Stream Relay
+
+    The Lambda-based `/stream` SSE relay is an internal integration for the first-party
+    frontend and is intentionally not described as part of this REST API contract.
+    External consumers that need pub/sub delivery should subscribe to the SNS topic
+    directly, or attach their own SQS subscription, rather than depending on the
+    internal stream relay.
+
+    ## Async Events (SNS)
+
+    Published domain events are sent to the SNS topic `rescue-request-events-v1-{stage}`.
+    The raw SNS payload currently uses a `header` + `body` envelope. Since this OpenAPI
+    document covers the REST surface only, consumers should treat the internal `/stream`
+    relay as non-contractual and subscribe to SNS directly when they need pub/sub delivery.
   version: "1.0.0"
   contact:
     name: Rescue Request Service
@@ -76,7 +100,7 @@ servers:
         default: "xxxxxxxxxx"
         description: API Gateway ID
       region:
-        default: "ap-southeast-1"
+        default: "ap-southeast-2"
         description: AWS region
       stage:
         default: "dev"
@@ -84,7 +108,7 @@ servers:
 
 tags:
   - name: Public
-    description: Citizen-facing endpoints â€” no authentication required
+    description: Citizen-facing endpoints - no authentication required
   - name: Staff
     description: Staff-facing endpoints for managing rescue requests
   - name: Commands
@@ -107,10 +131,10 @@ paths:
         The service returns a `trackingCode` that the citizen can later use together with
         their phone number to look up the status of their request.
 
-        **Phone uniqueness** â€” if `contactPhone` already exists on any prior request,
+        **Phone uniqueness** - if `contactPhone` already exists on any prior request,
         a `409 Conflict` is returned and a new request is not created.
 
-        **Duplicate detection** â€” additionally, if a request with the same incident, phone
+        **Duplicate detection** - additionally, if a request with the same incident, phone
         number, request type, approximate location, and submission time (within a 5-minute
         window) already exists, a `409 Conflict` is returned.
 
@@ -345,7 +369,7 @@ paths:
         - $ref: '#/components/parameters/Cursor'
         - name: since
           in: query
-          description: ISO-8601 timestamp â€” only return updates created after this time
+          description: ISO-8601 timestamp; only return updates created at or after this time
           schema:
             type: string
             format: date-time
@@ -420,12 +444,22 @@ paths:
 
         Cannot be called on requests in a terminal state (`RESOLVED` or `CANCELLED`).
 
-        Supports optimistic locking via the `If-Match` header (pass the current
-        `stateVersion` as the value). Idempotency is supported via `X-Idempotency-Key`.
+        The handler currently accepts the `If-Match` header for forward compatibility,
+        but the current PATCH implementation does not enforce version matching.
+        Idempotency is supported via `X-Idempotency-Key`.
+
+        The current implementation also publishes a `rescue-request.citizen-updated`
+        SNS event with `updateType` `PATCH` and `updateId` `patch`.
       parameters:
         - $ref: '#/components/parameters/RequestId'
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - name: If-Match
+          in: header
+          required: false
+          description: Accepted by the handler, but currently not enforced for PATCH requests
+          schema:
+            type: integer
+            minimum: 1
       requestBody:
         required: true
         content:
@@ -463,7 +497,7 @@ paths:
         Returns a paginated, ordered list of all status-change events recorded for
         the given rescue request.
 
-        Use `sinceVersion` to fetch only events after a known version number.
+        Use `sinceVersion` to fetch only events at or after a known version number.
         Use `order=DESC` to retrieve events newest-first.
       parameters:
         - $ref: '#/components/parameters/RequestId'
@@ -471,7 +505,7 @@ paths:
         - $ref: '#/components/parameters/Cursor'
         - name: sinceVersion
           in: query
-          description: Return only events with a version number greater than this value
+          description: Return only events with a version number greater than or equal to this value
           schema:
             type: integer
             minimum: 0
@@ -502,6 +536,9 @@ paths:
         Use this endpoint when you need fine-grained control over the transition.
         For standard lifecycle transitions prefer the dedicated command endpoints
         (`/triage`, `/assign`, `/start`, `/resolve`, `/cancel`).
+
+        There is no separate `changeReason` request field. When provided, the request
+        body field `reason` is persisted on the event as `changeReason`.
 
         Supports optimistic locking via `If-Match` and idempotency via
         `X-Idempotency-Key`.
@@ -577,8 +614,12 @@ paths:
       operationId: listByIncident
       summary: List rescue requests belonging to an incident
       description: |
-        Returns a paginated list of rescue request summaries for the given incident.
-        Optionally filtered by status.
+        Returns a paginated list of rescue requests for the given incident.
+        Each item contains the full master request record plus a `currentState`
+        snapshot and a top-level `status` derived from the latest current state
+        when available.
+
+        The optional `status` filter is applied against the latest current state.
       parameters:
         - name: incidentId
           in: path
@@ -591,16 +632,51 @@ paths:
         - $ref: '#/components/parameters/Cursor'
         - name: status
           in: query
-          description: Filter by request status
+          description: Filter by the latest request status
           schema:
             $ref: '#/components/schemas/RequestStatus'
       responses:
         '200':
-          description: Paginated list of request summaries
+          description: Paginated list of rescue requests enriched with current state
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListByIncidentResponse'
+              example:
+                items:
+                  - requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    incidentId: "INC-2024-001"
+                    status: "ASSIGNED"
+                    requestType: "FLOOD"
+                    description: "Water level rising rapidly, 5 people trapped on second floor"
+                    peopleCount: 5
+                    specialNeeds: "Elderly person, needs wheelchair"
+                    latitude: 13.7563
+                    longitude: 100.5018
+                    locationDetails: "Yellow house next to the big banyan tree"
+                    province: "Bangkok"
+                    district: "Bang Rak"
+                    subdistrict: "Bang Rak"
+                    addressLine: "123 Silom Road"
+                    contactName: "Somchai Jaidee"
+                    contactPhone: "0812345678"
+                    sourceChannel: "MOBILE"
+                    submittedAt: "2024-01-15T10:30:00.000000+00:00"
+                    lastCitizenUpdateAt: "2024-01-15T10:45:00.000000+00:00"
+                    currentState:
+                      requestId: "550e8400-e29b-41d4-a716-446655440000"
+                      incidentId: "INC-2024-001"
+                      lastEventId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                      stateVersion: 3
+                      status: "ASSIGNED"
+                      priorityScore: 85.5
+                      priorityLevel: "HIGH"
+                      assignedUnitId: "UNIT-007"
+                      assignedAt: "2024-01-15T11:00:00.000000+00:00"
+                      latestNote: "Team dispatched, ETA 15 minutes"
+                      lastUpdatedBy: "dispatcher-01"
+                      lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+                nextCursor: null
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -662,7 +738,7 @@ paths:
     post:
       tags: [Commands]
       operationId: triageRescueRequest
-      summary: Triage a submitted request (SUBMITTED â†’ TRIAGED)
+      summary: Triage a submitted request (SUBMITTED -> TRIAGED)
       description: |
         Advances a rescue request from `SUBMITTED` to `TRIAGED`.
 
@@ -683,7 +759,7 @@ paths:
               changedByRole: "dispatcher"
               priorityScore: 75.0
               priorityLevel: "HIGH"
-              note: "Verified â€” forwarding to field team Alpha"
+              note: "Verified - forwarding to field team Alpha"
       responses:
         '200':
           description: Transition applied
@@ -709,7 +785,7 @@ paths:
     post:
       tags: [Commands]
       operationId: assignRescueRequest
-      summary: Assign a responder unit (TRIAGED â†’ ASSIGNED)
+      summary: Assign a responder unit (TRIAGED -> ASSIGNED)
       description: |
         Advances a rescue request from `TRIAGED` to `ASSIGNED` and records
         the responding unit.
@@ -767,7 +843,7 @@ paths:
     post:
       tags: [Commands]
       operationId: startRescueRequest
-      summary: Start the rescue operation (ASSIGNED â†’ IN_PROGRESS)
+      summary: Start the rescue operation (ASSIGNED -> IN_PROGRESS)
       description: |
         Advances a rescue request from `ASSIGNED` to `IN_PROGRESS`.
 
@@ -812,10 +888,10 @@ paths:
     post:
       tags: [Commands]
       operationId: resolveRescueRequest
-      summary: Resolve a rescue request (IN_PROGRESS â†’ RESOLVED)
+      summary: Resolve a rescue request (IN_PROGRESS -> RESOLVED)
       description: |
         Advances a rescue request from `IN_PROGRESS` to `RESOLVED`.
-        This is a **terminal transition** â€” the request cannot be modified further.
+        This is a **terminal transition** - the request cannot be modified further.
 
         Publishes both `rescue-request.status-changed` and `rescue-request.resolved`
         SNS events.
@@ -861,10 +937,10 @@ paths:
     post:
       tags: [Commands]
       operationId: cancelRescueRequest
-      summary: Cancel a rescue request (* â†’ CANCELLED)
+      summary: Cancel a rescue request (* -> CANCELLED)
       description: |
         Cancels a rescue request from any non-terminal state.
-        This is a **terminal transition** â€” the request cannot be modified further.
+        This is a **terminal transition** - the request cannot be modified further.
 
         **`reason` is required** in the request body.
 
@@ -983,7 +1059,7 @@ components:
       name: limit
       in: query
       required: false
-      description: Maximum number of items to return (1â€“100)
+      description: Maximum number of items to return (1-100)
       schema:
         type: integer
         minimum: 1
@@ -1111,7 +1187,7 @@ components:
           example: "Somchai Jaidee"
         contactPhone:
           type: string
-          description: Mobile phone number of the contact (10â€“15 digits)
+          description: Contact phone number; current validation accepts 7-20 chars consisting of digits, spaces, `+`, `-`, and parentheses
           example: "0812345678"
         sourceChannel:
           $ref: '#/components/schemas/SourceChannel'
@@ -1250,7 +1326,7 @@ components:
         reason:
           type: string
           nullable: true
-          description: Cancellation reason (required when `newStatus` is `CANCELLED`)
+          description: Stored on the event as `changeReason`; required when `newStatus` is `CANCELLED`
           example: "Duplicate report"
         priorityScore:
           type: number
@@ -1303,7 +1379,7 @@ components:
           type: string
           nullable: true
           description: Operational note stored on the current state
-          example: "Verified â€” forwarding to field team Alpha"
+          example: "Verified - forwarding to field team Alpha"
         meta:
           type: object
           nullable: true
@@ -1460,6 +1536,7 @@ components:
         changeReason:
           type: string
           nullable: true
+          description: Value copied from request body field `reason`, when provided
         meta:
           type: object
           nullable: true
@@ -1734,22 +1811,15 @@ components:
           nullable: true
 
     IncidentRequestSummary:
-      type: object
-      properties:
-        requestId:
-          type: string
-          format: uuid
-        incidentId:
-          type: string
-        status:
-          $ref: '#/components/schemas/RequestStatus'
-        requestType:
-          $ref: '#/components/schemas/RequestType'
-        contactName:
-          type: string
-        submittedAt:
-          type: string
-          format: date-time
+      allOf:
+        - $ref: '#/components/schemas/RescueRequestMaster'
+        - type: object
+          properties:
+            status:
+              $ref: '#/components/schemas/RequestStatus'
+            currentState:
+              $ref: '#/components/schemas/CurrentStateResponse'
+              nullable: true
 
     IdempotencyRecordResponse:
       type: object
@@ -1811,7 +1881,7 @@ components:
               issue:
                 type: string
                 description: Description of the problem
-                example: "must be a valid phone number (10-15 digits)"
+                example: "invalid phone number format"
 
 
 
@@ -1869,7 +1939,7 @@ components:
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
             details:
               - field: "contactPhone"
-                issue: "must be a valid phone number (10-15 digits)"
+                issue: "invalid phone number format"
               - field: "latitude"
                 issue: "must be between -90 and 90"
 
