@@ -16,6 +16,13 @@ This service provides a REST API for:
 - managing staff workflows (`triage -> assign -> start -> resolve/cancel`)
 - publishing domain events to SNS
 
+## Useful Links
+
+- [API Summary](./docs/api-summary.md): Human-readable API reference covering endpoints, behaviors, and integration notes.
+- [Data Model](./docs/data-model.md): Current DynamoDB table design, item types, and field-level persistence model.
+- [Frontend Repository](https://github.com/Phattharaphum/rescue-request-service-frontend): First-party frontend codebase that consumes this backend service.
+- [Frontend Application](https://rescue-request.phatphum.me/): Deployed web application for submitting and tracking rescue requests.
+
 ## Architecture
 
 - API: AWS API Gateway (REST)
