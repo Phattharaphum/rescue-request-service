@@ -1,6 +1,6 @@
 ﻿# API Reference
 
-**Base URL:** `https://t8syiso74e.execute-api.ap-southeast-2.amazonaws.com/dev/v1/`
+**Base URL:** `Not available`
 
 A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml`](openapi.yaml).
 

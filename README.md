@@ -19,9 +19,10 @@ This service provides a REST API for:
 ## Useful Links
 
 - [API Summary](./docs/api-summary.md): Human-readable API reference covering endpoints, behaviors, and integration notes.
+- [DOCS](./DOCS.md): Project documentation and implementation details.
 - [Data Model](./docs/data-model.md): Current DynamoDB table design, item types, and field-level persistence model.
 - [Frontend Repository](https://github.com/Phattharaphum/rescue-request-service-frontend): First-party frontend codebase that consumes this backend service.
-- [Frontend Application](https://rescue-request.phatphum.me/): Deployed web application for submitting and tracking rescue requests.
+- [Frontend Application](Not available): Deployed web application for submitting and tracking rescue requests.
 
 ## Architecture
 
