@@ -16,6 +16,7 @@ Globals:
     Environment:
       Variables:
         STAGE: local
+        APP_AWS_REGION: ap-southeast-1
         DYNAMODB_TABLE_NAME: RescueRequestTable
         IDEMPOTENCY_TABLE_NAME: IdempotencyTable
         SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
