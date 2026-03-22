@@ -99,6 +99,7 @@ Current `.env.json` format:
 {
   "Parameters": {
     "STAGE": "local",
+    "APP_AWS_REGION": "ap-southeast-1",
     "AWS_REGION": "ap-southeast-1",
     "AWS_DEFAULT_REGION": "ap-southeast-1",
     "AWS_ACCESS_KEY_ID": "test",
@@ -456,6 +457,7 @@ make test-integration
 - If API returns `ResourceNotFoundException: Cannot do operations on a non-existent table`:
   - run `make local-db-start`
   - run `aws dynamodb list-tables --endpoint-url http://localhost:4566 --region ap-southeast-1`
+  - verify `APP_AWS_REGION` is set to the same region used when creating tables
   - confirm both `RescueRequestTable` and `IdempotencyTable` exist
 - If API returns `SNS_TOPIC_ARN not set`, create topic in LocalStack and set ARN in `.env.json`.
 - If Docker shows `Access is denied` on Windows, run Docker Desktop and terminal with sufficient permission.
