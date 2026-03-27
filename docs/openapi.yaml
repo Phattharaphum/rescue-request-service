@@ -88,6 +88,9 @@ info:
     The raw SNS payload currently uses a `header` + `body` envelope. Since this OpenAPI
     document covers the REST surface only, consumers should treat the internal `/stream`
     relay as non-contractual and subscribe to SNS directly when they need pub/sub delivery.
+    Event types include `rescue-request.created`, `rescue-request.status-changed`,
+    `rescue-request.citizen-updated`, `rescue-request.priority-score-updated`,
+    `rescue-request.resolved`, and `rescue-request.cancelled`.
   version: "1.0.0"
   contact:
     name: Rescue Request Service
@@ -564,6 +567,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusTransitionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rescue-requests/{requestId}/priority:
+    patch:
+      tags: [Staff]
+      operationId: updateRescueRequestPriority
+      summary: Synchronously update priority fields on a rescue request
+      description: |
+        Updates priority-related values on the request's `currentState` without changing
+        lifecycle status.
+
+        **Editable fields**: `priorityScore`, `priorityLevel`, `note`.
+        At least one editable field must be present in the body.
+
+        Cannot be called on requests in a terminal state (`RESOLVED` or `CANCELLED`).
+
+        Supports optimistic locking via `If-Match` and idempotency via
+        `X-Idempotency-Key`.
+
+        When `priorityScore` changes, the service publishes a
+        `rescue-request.priority-score-updated` SNS event.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRescueRequestPriorityBody'
+            example:
+              priorityScore: 92.5
+              priorityLevel: "CRITICAL"
+              note: "Escalated after reassessment"
+      responses:
+        '200':
+          description: Priority fields updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateRescueRequestPriorityResponse'
+              example:
+                requestId: "550e8400-e29b-41d4-a716-446655440000"
+                priorityScore: 92.5
+                priorityLevel: "CRITICAL"
+                note: "Escalated after reassessment"
+                updatedAt: "2024-01-15T11:05:00.000000+00:00"
+                updated: ["priorityScore", "priorityLevel", "note"]
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1301,6 +1360,29 @@ components:
           description: Revised street address
           example: "123/4 Silom Road"
 
+    UpdateRescueRequestPriorityBody:
+      type: object
+      description: |
+        Any combination of priority fields may be provided.
+        At least one field is required.
+      properties:
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+          description: New numerical priority score
+          example: 92.5
+        priorityLevel:
+          type: string
+          nullable: true
+          description: New human-readable priority label
+          example: "CRITICAL"
+        note:
+          type: string
+          nullable: true
+          description: New operational note (stored as `latestNote` in current state)
+          example: "Escalated after reassessment"
+
     AppendStatusEventBody:
       type: object
       required:
@@ -1687,6 +1769,32 @@ components:
             type: string
           description: List of field names that were updated
           example: ["description", "peopleCount"]
+
+    UpdateRescueRequestPriorityResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        priorityScore:
+          type: number
+          format: double
+          nullable: true
+        priorityLevel:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        updated:
+          type: array
+          items:
+            type: string
+          description: List of priority fields that were updated
+          example: ["priorityScore", "priorityLevel", "note"]
 
     ListStatusEventsResponse:
       type: object

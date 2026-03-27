@@ -1,6 +1,7 @@
 # Staff Lambda Functions
 # - GetRescueRequestFunction
 # - PatchRescueRequestFunction
+# - UpdateRescueRequestPriorityFunction
 # - ListStatusEventsFunction
 # - AppendStatusEventFunction
 # - GetCurrentStateFunction
