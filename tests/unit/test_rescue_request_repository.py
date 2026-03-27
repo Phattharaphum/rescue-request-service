@@ -223,3 +223,21 @@ def test_append_event_and_update_current_rolls_back_event_when_fallback_update_f
 
     assert len(table.put_calls) == 1
     assert table.delete_calls == [{"Key": {"PK": "REQ#req-123", "SK": "EVENT#0000000002"}}]
+
+
+def test_update_current_fields_targets_current_item_and_enforces_expected_version(monkeypatch):
+    client = _FakeClient()
+    table = _FakeTable()
+    resource = _FakeResource(client, table)
+    monkeypatch.setattr(repository, "get_dynamodb_resource", lambda: resource)
+
+    repository.update_current_fields(
+        request_id="req-123",
+        updates={"priorityScore": 90.5, "latestNote": "Escalated"},
+        expected_version=3,
+    )
+
+    call = table.update_calls[0]
+    assert call["Key"] == {"PK": "REQ#req-123", "SK": "CURRENT"}
+    assert "stateVersion = :expected_version" in call["ConditionExpression"]
+    assert call["ExpressionAttributeValues"][":expected_version"] == 3

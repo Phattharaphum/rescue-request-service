@@ -558,6 +558,35 @@ def update_master_fields(request_id: str, updates: dict, expected_version: int |
     table.update_item(**kwargs)
 
 
+def update_current_fields(request_id: str, updates: dict, expected_version: int | None = None) -> None:
+    table = _get_table()
+    update_parts = []
+    expr_values = {}
+    expr_names = {}
+
+    for key, value in updates.items():
+        safe_key = f"#k_{key}"
+        safe_val = f":v_{key}"
+        expr_names[safe_key] = key
+        expr_values[safe_val] = value if not isinstance(value, float) else Decimal(str(value))
+        update_parts.append(f"{safe_key} = {safe_val}")
+
+    condition_parts = ["attribute_exists(PK)"]
+    if expected_version is not None:
+        expr_values[":expected_version"] = expected_version
+        condition_parts.append("stateVersion = :expected_version")
+
+    kwargs: dict[str, Any] = {
+        "Key": {"PK": f"REQ#{request_id}", "SK": "CURRENT"},
+        "UpdateExpression": "SET " + ", ".join(update_parts),
+        "ExpressionAttributeNames": expr_names,
+        "ExpressionAttributeValues": expr_values,
+        "ConditionExpression": " AND ".join(condition_parts),
+    }
+
+    table.update_item(**kwargs)
+
+
 def check_duplicate_signature(signature: str) -> dict | None:
     table = _get_table()
     resp = table.query(

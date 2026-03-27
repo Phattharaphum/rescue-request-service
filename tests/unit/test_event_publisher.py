@@ -47,3 +47,35 @@ class TestPublishCitizenUpdated:
             "updateId": "upd-2",
             "updateType": "PATCH",
         }
+
+
+class TestPublishPriorityScoreUpdated:
+    def test_includes_priority_payload(self, monkeypatch):
+        captured: dict = {}
+
+        def _fake_publish_event(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(event_publisher, "publish_event", _fake_publish_event)
+
+        event_publisher.publish_priority_score_updated(
+            request_id="req-3",
+            previous_priority_score=42.5,
+            new_priority_score=88.0,
+            priority_level="HIGH",
+            note="Escalated by supervisor",
+            updated_at="2026-03-27T10:30:00+00:00",
+            correlation_id="corr-123",
+        )
+
+        assert captured["event_type"] == "rescue-request.priority-score-updated"
+        assert captured["partition_key"] == "req-3"
+        assert captured["correlation_id"] == "corr-123"
+        assert captured["body"] == {
+            "requestId": "req-3",
+            "previousPriorityScore": 42.5,
+            "newPriorityScore": 88.0,
+            "priorityLevel": "HIGH",
+            "note": "Escalated by supervisor",
+            "updatedAt": "2026-03-27T10:30:00+00:00",
+        }

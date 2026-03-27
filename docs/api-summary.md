@@ -27,6 +27,7 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [GET /rescue-requests/{requestId}/current](#75-get-rescue-requestsrequestidcurrent)
    - [GET /incidents/{incidentId}/rescue-requests](#76-get-incidentsincidentidrescue-requests)
    - [GET /idempotency-keys/{idempotencyKeyHash}](#77-get-idempotency-keysidempotencykeyhash)
+   - [PATCH /rescue-requests/{requestId}/priority](#78-patch-rescue-requestsrequestidpriority)
 8. [Command Endpoints (State Machine)](#8-command-endpoints-state-machine)
    - [POST /rescue-requests/{requestId}/triage](#81-post-rescue-requestsrequestidtriage)
    - [POST /rescue-requests/{requestId}/assign](#82-post-rescue-requestsrequestidassign)
@@ -57,7 +58,7 @@ The Rescue Request Service provides a REST API for managing disaster rescue requ
 | Header | Direction | Description |
 |--------|-----------|-------------|
 | `X-Idempotency-Key` | Request | UUID v4. Makes mutating operations safe to retry. Optional on all mutating endpoints. |
-| `If-Match` | Request | Current `stateVersion` integer. Enforced on `POST /rescue-requests/{requestId}/events` and command endpoints. `PATCH /rescue-requests/{requestId}` currently accepts the header but does not enforce version checks. |
+| `If-Match` | Request | Current `stateVersion` integer. Enforced on `POST /rescue-requests/{requestId}/events`, command endpoints, and `PATCH /rescue-requests/{requestId}/priority`. `PATCH /rescue-requests/{requestId}` currently accepts the header but does not enforce version checks. |
 | `X-Forwarded-For` | Request | Client IP, set automatically by API Gateway. |
 | `User-Agent` | Request | Client user-agent string. |
 | `X-Trace-Id` | Response | UUID included in every response for request tracing. |
@@ -766,6 +767,56 @@ debugging replayed or in-flight requests.
 
 ---
 
+### 7.8 PATCH /rescue-requests/{requestId}/priority
+
+Synchronously updates priority-related fields on the request's `currentState`.
+
+**Editable fields:** `priorityScore`, `priorityLevel`, `note`  
+(`note` is stored internally as `latestNote` on `currentState`)
+
+At least one editable field must be present.
+Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELLED`).
+
+#### Request
+
+| Location | Field | Type | Required | Description |
+|----------|-------|------|----------|-------------|
+| Path | `requestId` | UUID | **Yes** | |
+| Header | `X-Idempotency-Key` | UUID | No | Idempotency key |
+| Header | `If-Match` | integer | No | Expected `stateVersion` for optimistic concurrency check |
+| Body | `priorityScore` | number \| null | No | New numerical priority score |
+| Body | `priorityLevel` | string \| null | No | New human-readable priority label |
+| Body | `note` | string \| null | No | New operational note |
+
+**Example request body:**
+```json
+{
+  "priorityScore": 92.5,
+  "priorityLevel": "CRITICAL",
+  "note": "Escalated after reassessment"
+}
+```
+
+#### Response `200 OK`
+
+```json
+{
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "priorityScore": 92.5,
+  "priorityLevel": "CRITICAL",
+  "note": "Escalated after reassessment",
+  "updatedAt": "2024-01-15T11:05:00.000000+00:00",
+  "updated": ["priorityScore", "priorityLevel", "note"]
+}
+```
+
+When `priorityScore` changes, the service publishes a
+`rescue-request.priority-score-updated` SNS event.
+
+**Error responses:** `404`, `409`, `422`
+
+---
+
 ## 8. Command Endpoints (State Machine)
 
 All command endpoints share the same response shape ([StatusTransitionResponse](#statustransitionresponse))
@@ -960,6 +1011,7 @@ That relay shape is internal-only and should not be treated as a public contract
 | `rescue-request.created` | New request created | `requestId`, `data` (current implementation publishes the full persisted master item, including internal storage fields) |
 | `rescue-request.status-changed` | Any state transition | `requestId`, `previousStatus`, `newStatus`, `eventId`, `version` |
 | `rescue-request.citizen-updated` | Citizen submits an update, or staff PATCH edits the master record | Citizen update: `requestId`, `updateId`, `updateType`, `updatePayload`, `createdAt`; PATCH: `requestId`, `updateId="patch"`, `updateType="PATCH"`, `updatePayload` |
+| `rescue-request.priority-score-updated` | Staff priority sync API updates `priorityScore` | `requestId`, `previousPriorityScore`, `newPriorityScore`, optional `priorityLevel`, optional `note`, optional `updatedAt` |
 | `rescue-request.resolved` | Request resolved | `requestId`, `eventId` |
 | `rescue-request.cancelled` | Request cancelled | `requestId`, `eventId`, `reason` |
 
@@ -994,6 +1046,7 @@ X-Idempotency-Key: f47ac10b-58cc-4372-a567-0e02b2c3d479
 | `POST /rescue-requests` | `CreateRescueRequest` |
 | `POST /citizen/rescue-requests/{requestId}/updates` | `CreateCitizenUpdate` |
 | `PATCH /rescue-requests/{requestId}` | `PatchRescueRequest` |
+| `PATCH /rescue-requests/{requestId}/priority` | `UpdateRescueRequestPriority` |
 | `POST /rescue-requests/{requestId}/events` | `AppendStatusEvent` |
 | `POST /rescue-requests/{requestId}/triage` | `Triage` |
 | `POST /rescue-requests/{requestId}/assign` | `Assign` |

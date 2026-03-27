@@ -12,6 +12,7 @@
 # Staff endpoints:
 #   GET   /v1/rescue-requests/{requestId} - GetRescueRequest
 #   PATCH /v1/rescue-requests/{requestId} - PatchRescueRequest
+#   PATCH /v1/rescue-requests/{requestId}/priority - UpdateRescueRequestPriority
 #   GET   /v1/rescue-requests/{requestId}/events - ListStatusEvents
 #   POST  /v1/rescue-requests/{requestId}/events - AppendStatusEvent
 #   GET   /v1/rescue-requests/{requestId}/current - GetCurrentState

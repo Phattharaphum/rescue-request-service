@@ -436,6 +436,7 @@ make test-integration
 ### Staff
 - `GET /v1/rescue-requests/{requestId}`
 - `PATCH /v1/rescue-requests/{requestId}`
+- `PATCH /v1/rescue-requests/{requestId}/priority`
 - `GET /v1/rescue-requests/{requestId}/events`
 - `POST /v1/rescue-requests/{requestId}/events`
 - `GET /v1/rescue-requests/{requestId}/current`

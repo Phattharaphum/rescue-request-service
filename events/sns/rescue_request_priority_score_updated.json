@@ -1,0 +1,21 @@
+{
+  "header": {
+    "messageId": "550e8400-e29b-41d4-a716-446655440010",
+    "eventType": "rescue-request.priority-score-updated",
+    "schemaVersion": "1.0",
+    "producer": "rescue-request-service",
+    "occurredAt": "2024-01-01T00:05:00+00:00",
+    "traceId": "trace-010",
+    "correlationId": "corr-010",
+    "partitionKey": "request-001",
+    "contentType": "application/json"
+  },
+  "body": {
+    "requestId": "request-001",
+    "previousPriorityScore": 65.0,
+    "newPriorityScore": 90.5,
+    "priorityLevel": "CRITICAL",
+    "note": "Escalated after reassessment",
+    "updatedAt": "2024-01-01T00:05:00+00:00"
+  }
+}

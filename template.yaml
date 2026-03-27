@@ -246,6 +246,26 @@ Resources:
             Path: /v1/rescue-requests/{requestId}
             Method: PATCH
 
+  UpdateRescueRequestPriorityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.update_rescue_request_priority.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/priority
+            Method: PATCH
+
   ListStatusEventsFunction:
     Type: AWS::Serverless::Function
     Properties:

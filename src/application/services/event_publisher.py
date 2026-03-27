@@ -57,6 +57,35 @@ def publish_citizen_updated(
     )
 
 
+def publish_priority_score_updated(
+    request_id: str,
+    previous_priority_score: float | int | None,
+    new_priority_score: float | int | None,
+    priority_level: str | None = None,
+    note: str | None = None,
+    updated_at: str | None = None,
+    correlation_id: str | None = None,
+) -> None:
+    body = {
+        "requestId": request_id,
+        "previousPriorityScore": previous_priority_score,
+        "newPriorityScore": new_priority_score,
+    }
+    if priority_level is not None:
+        body["priorityLevel"] = priority_level
+    if note is not None:
+        body["note"] = note
+    if updated_at is not None:
+        body["updatedAt"] = updated_at
+
+    publish_event(
+        event_type="rescue-request.priority-score-updated",
+        body=body,
+        partition_key=request_id,
+        correlation_id=correlation_id,
+    )
+
+
 def publish_resolved(request_id: str, event_id: str, correlation_id: str | None = None) -> None:
     publish_event(
         event_type="rescue-request.resolved",
