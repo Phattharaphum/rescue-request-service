@@ -1,4 +1,11 @@
 from src.adapters.messaging.sns_publisher import publish_event
+from src.adapters.messaging.prioritization_publisher import (
+    publish_prioritization_command as publish_prioritization_command_message,
+)
+from src.adapters.messaging.prioritization_publisher import (
+    publish_prioritization_re_evaluation as publish_prioritization_re_evaluation_message,
+)
+from src.application.services.prioritization_contract import build_prioritization_snapshot
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -101,4 +108,23 @@ def publish_cancelled(request_id: str, event_id: str, reason: str, correlation_i
         body={"requestId": request_id, "eventId": event_id, "reason": reason},
         partition_key=request_id,
         correlation_id=correlation_id,
+    )
+
+
+def publish_prioritization_command(request_data: dict, trace_id: str | None = None) -> dict | None:
+    return publish_prioritization_command_message(
+        body=build_prioritization_snapshot(request_data),
+        trace_id=trace_id,
+    )
+
+
+def publish_prioritization_re_evaluation(
+    request_data: dict,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+) -> dict | None:
+    return publish_prioritization_re_evaluation_message(
+        body=build_prioritization_snapshot(request_data),
+        correlation_id=correlation_id,
+        trace_id=trace_id,
     )

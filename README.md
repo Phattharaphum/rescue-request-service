@@ -21,6 +21,7 @@ This service provides a REST API for:
 - [API Summary](./docs/api-summary.md): Human-readable API reference covering endpoints, behaviors, and integration notes.
 - [DOCS](./DOCS.md): Project documentation and implementation details.
 - [Data Model](./docs/data-model.md): Current DynamoDB table design, item types, and field-level persistence model.
+- [Prioritization + Incident Sync](./docs/prioritization-incident-sync.md): Async prioritization contract, incident sync schedule, Secrets Manager setup, and local/deploy instructions for the new integrations.
 - [Frontend Repository](https://github.com/Phattharaphum/rescue-request-service-frontend): First-party frontend codebase that consumes this backend service.
 - [Frontend Application](Not available): Deployed web application for submitting and tracking rescue requests.
 
@@ -28,8 +29,8 @@ This service provides a REST API for:
 
 - API: AWS API Gateway (REST)
 - Compute: AWS Lambda (Python 3.11)
-- Database: DynamoDB (single-table design + idempotency table)
-- Messaging: SNS
+- Database: DynamoDB (single-table rescue requests + idempotency table + incident catalog table)
+- Messaging: SNS + SQS
 - IaC: AWS SAM / CloudFormation
 - Local stack: LocalStack (DynamoDB + SNS + SQS)
 
@@ -105,7 +106,12 @@ Current `.env.json` format:
     "AWS_ACCESS_KEY_ID": "test",
     "AWS_SECRET_ACCESS_KEY": "test",
     "DYNAMODB_ENDPOINT": "http://localstack:4566",
-    "SNS_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:000000000000:rescue-request-events-v1"
+    "SNS_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:000000000000:rescue-request-events-v1",
+    "INCIDENT_CATALOG_TABLE_NAME": "IncidentCatalogTable",
+    "PRIORITIZATION_COMMANDS_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:000000000000:rescue-prioritization-commands-v1",
+    "PRIORITIZATION_REEVALUATE_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:000000000000:rescue-prioritization-updated-v1",
+    "INCIDENT_SYNC_SECRET_ID": "rescue-request-service/incident-tracking/local",
+    "INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS": "30"
   }
 }
 ```
@@ -128,6 +134,7 @@ What this does:
 - starts `local/localstack` on `http://localhost:4566`
 - creates `RescueRequestTable`
 - creates `IdempotencyTable`
+- creates `IncidentCatalogTable`
 
 Verify tables were created:
 
@@ -144,6 +151,7 @@ aws dynamodb list-tables --endpoint-url http://localhost:4566 --region ap-southe
 Expected table names:
 - `RescueRequestTable`
 - `IdempotencyTable`
+- `IncidentCatalogTable`
 
 ### Step 2: Export AWS CLI credentials for LocalStack
 

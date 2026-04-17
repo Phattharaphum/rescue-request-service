@@ -7,11 +7,16 @@ from src.adapters.persistence.rescue_request_repository import (
     get_master,
     get_current_state,
     put_citizen_update,
+    update_current_fields,
     update_master_fields,
 )
 from src.adapters.utils.hashing import hash_tracking_code
-from src.application.services.event_publisher import publish_citizen_updated
+from src.application.services.event_publisher import publish_citizen_updated, publish_prioritization_re_evaluation
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
+from src.application.services.prioritization_contract import (
+    apply_citizen_update_to_master,
+    requires_re_evaluation_for_update_type,
+)
 from src.domain.enums.update_type import UpdateType
 from src.domain.enums.request_status import RequestStatus
 from src.shared.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
@@ -120,6 +125,25 @@ def execute(
         )
     except Exception:
         logger.exception("Failed to publish citizen-updated event")
+
+    if requires_re_evaluation_for_update_type(update_type):
+        try:
+            updated_request = apply_citizen_update_to_master(master, update_type, body["updatePayload"])
+            header = publish_prioritization_re_evaluation(
+                request_data=updated_request,
+                correlation_id=current.get("lastPrioritizationMessageId"),
+            )
+            if header:
+                update_current_fields(
+                    request_id=request_id,
+                    updates={
+                        "lastPrioritizationMessageId": header["messageId"],
+                        "lastPrioritizationMessageType": header["messageType"],
+                        "lastPrioritizationSentAt": header["sentAt"],
+                    },
+                )
+        except Exception:
+            logger.exception("Failed to publish prioritization re-evaluation event")
 
     return result
 

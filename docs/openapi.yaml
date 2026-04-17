@@ -74,6 +74,13 @@ info:
     REST API preflight is handled by API Gateway, while application responses include
     `Access-Control-Allow-Origin` and `Vary: Origin`.
 
+    ## Incident Catalog
+
+    `GET /v1/incidents` serves the locally stored incident catalog used by clients when
+    selecting an incident. The catalog is refreshed asynchronously from IncidentTracking
+    Service every 30 minutes, so the REST API reads from the database snapshot instead of
+    calling the external service inline.
+
     ## Internal Stream Relay
 
     The Lambda-based `/stream` SSE relay is an internal integration for the first-party
@@ -91,6 +98,12 @@ info:
     Event types include `rescue-request.created`, `rescue-request.status-changed`,
     `rescue-request.citizen-updated`, `rescue-request.priority-score-updated`,
     `rescue-request.resolved`, and `rescue-request.cancelled`.
+
+    Rescue-request creation and relevant citizen/staff updates also publish prioritization
+    messages to the logical channels `rescue.prioritization.commands.v1` and
+    `rescue.prioritization.updated.v1` (backed by AWS SNS topics whose physical names use
+    hyphens). Evaluated results are ingested asynchronously and reflected on the
+    `currentState` prioritization metadata fields documented below.
   version: "1.0.0"
   contact:
     name: Rescue Request Service
@@ -122,6 +135,52 @@ paths:
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   #  PUBLIC ENDPOINTS
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /incidents:
+    get:
+      tags: [Public]
+      operationId: listIncidents
+      summary: List incidents from the local incident catalog
+      description: |
+        Returns a paginated list of incidents that citizens can choose from when
+        creating a rescue request.
+
+        This endpoint reads from the service-owned incident catalog table, which is
+        refreshed asynchronously from IncidentTracking Service every 30 minutes.
+        It does not call the external incident API inline.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          description: Filter by the incident status stored in the local catalog snapshot
+          schema:
+            type: string
+          example: "REPORTED"
+      responses:
+        '200':
+          description: Paginated list of incidents from the local catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListIncidentsResponse'
+              example:
+                items:
+                  - incidentId: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
+                    incidentType: "fire"
+                    incidentName: "IncidentA"
+                    incidentSequence: 1
+                    status: "REPORTED"
+                    incidentDescription: "Fire reported near TU Dome (Verified)"
+                    remoteCreatedAt: "2026-02-22T00:00:00Z"
+                    remoteUpdatedAt: "2026-02-22T00:01:04Z"
+                    lastSyncedAt: "2026-04-17T08:30:00+00:00"
+                nextCursor: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /rescue-requests:
     post:
@@ -662,6 +721,14 @@ paths:
                 latestNote: "Team dispatched, ETA 15 minutes"
                 lastUpdatedBy: "staff-001"
                 lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+                lastPrioritizationMessageId: "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c"
+                lastPrioritizationMessageType: "RescueRequestReEvaluateEvent"
+                lastPrioritizationSentAt: "2026-04-17T00:03:00+00:00"
+                latestPriorityEvaluationId: "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f"
+                latestPriorityReason: "Children and bedridden residents need urgent rescue."
+                latestPriorityEvaluatedAt: "2026-04-17T00:04:30+00:00"
+                latestPriorityCorrelationId: "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c"
+                lastPriorityIngestedAt: "2026-04-17T00:05:00+00:00"
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -735,6 +802,14 @@ paths:
                       latestNote: "Team dispatched, ETA 15 minutes"
                       lastUpdatedBy: "dispatcher-01"
                       lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+                      lastPrioritizationMessageId: "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c"
+                      lastPrioritizationMessageType: "RescueRequestReEvaluateEvent"
+                      lastPrioritizationSentAt: "2026-04-17T00:03:00+00:00"
+                      latestPriorityEvaluationId: "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f"
+                      latestPriorityReason: "Children and bedridden residents need urgent rescue."
+                      latestPriorityEvaluatedAt: "2026-04-17T00:04:30+00:00"
+                      latestPriorityCorrelationId: "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c"
+                      lastPriorityIngestedAt: "2026-04-17T00:05:00+00:00"
                 nextCursor: null
         '500':
           $ref: '#/components/responses/InternalServerError'
@@ -1196,6 +1271,23 @@ components:
         - FAILED
       example: COMPLETED
 
+    FlexibleSpecialNeeds:
+      nullable: true
+      oneOf:
+        - type: string
+          minLength: 1
+        - type: array
+          items:
+            type: string
+          minItems: 1
+      description: |
+        Special-needs value as currently persisted by the service. Creation and staff PATCH
+        flows do not enforce a strict shape, so existing records may contain either a single
+        string, an array of strings, or `null`.
+      example:
+        - bedridden
+        - children
+
     # â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     CreateRescueRequestBody:
@@ -1251,10 +1343,7 @@ components:
         sourceChannel:
           $ref: '#/components/schemas/SourceChannel'
         specialNeeds:
-          type: string
-          nullable: true
-          description: Any special requirements (e.g. medical equipment, wheelchair)
-          example: "Elderly person, needs wheelchair"
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         locationDetails:
           type: string
           nullable: true
@@ -1345,10 +1434,7 @@ components:
           description: Revised head count
           example: 7
         specialNeeds:
-          type: string
-          nullable: true
-          description: Updated special requirements
-          example: "One person has a broken leg"
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         locationDetails:
           type: string
           nullable: true
@@ -1526,8 +1612,7 @@ components:
           type: integer
           nullable: true
         specialNeeds:
-          type: string
-          nullable: true
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         submittedAt:
           type: string
           format: date-time
@@ -1680,6 +1765,64 @@ components:
           type: string
           format: date-time
 
+    ListIncidentsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentCatalogItem'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass as `cursor` for the next page; `null` when no more pages
+
+    IncidentCatalogItem:
+      type: object
+      properties:
+        incidentId:
+          type: string
+          description: Incident identifier from IncidentTracking Service
+          example: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
+        incidentType:
+          type: string
+          nullable: true
+          description: Incident category from the upstream incident service
+          example: "fire"
+        incidentName:
+          type: string
+          description: Stable locally assigned display name (`IncidentA`, `IncidentB`, ...)
+          example: "IncidentA"
+        incidentSequence:
+          type: integer
+          description: Monotonic sequence used to derive `incidentName`
+          example: 1
+        status:
+          type: string
+          nullable: true
+          description: Latest incident status captured in the local catalog snapshot
+          example: "REPORTED"
+        incidentDescription:
+          type: string
+          nullable: true
+          description: Incident description captured from the upstream incident service
+          example: "Fire reported near TU Dome (Verified)"
+        remoteCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Upstream `created_at` timestamp, when available
+        remoteUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Upstream `updated_at` timestamp, when available
+        lastSyncedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when this local catalog entry was last refreshed
+
     GetRescueRequestResponse:
       type: object
       properties:
@@ -1719,8 +1862,7 @@ components:
         peopleCount:
           type: integer
         specialNeeds:
-          type: string
-          nullable: true
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         latitude:
           type: number
           format: double
@@ -1906,6 +2048,43 @@ components:
           type: string
           format: date-time
           nullable: true
+        lastPrioritizationMessageId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Most recent outbound prioritization message ID published by this service
+        lastPrioritizationMessageType:
+          type: string
+          nullable: true
+          description: Most recent outbound prioritization message type published by this service
+        lastPrioritizationSentAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when the most recent prioritization message was published
+        latestPriorityEvaluationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Evaluation ID from the latest ingested prioritization result
+        latestPriorityReason:
+          type: string
+          nullable: true
+          description: Explanation returned by the latest ingested prioritization result
+        latestPriorityEvaluatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when the latest prioritization result was evaluated upstream
+        latestPriorityCorrelationId:
+          type: string
+          nullable: true
+          description: Correlation ID from the latest ingested prioritization result
+        lastPriorityIngestedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when the latest prioritization result was successfully ingested
 
     ListByIncidentResponse:
       type: object

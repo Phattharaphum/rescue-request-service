@@ -1,8 +1,14 @@
 import json
 
-from src.adapters.persistence.rescue_request_repository import get_current_state, get_master, update_master_fields
-from src.application.services.event_publisher import publish_citizen_updated
+from src.adapters.persistence.rescue_request_repository import (
+    get_current_state,
+    get_master,
+    update_current_fields,
+    update_master_fields,
+)
+from src.application.services.event_publisher import publish_citizen_updated, publish_prioritization_re_evaluation
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
+from src.application.services.prioritization_contract import apply_patch_updates_to_master
 from src.domain.enums.request_status import RequestStatus
 from src.shared.errors import ConflictError, NotFoundError, ValidationError
 from src.shared.logger import get_logger
@@ -35,7 +41,8 @@ def execute(request_id: str, body: dict, idempotency_key: str | None = None, exp
         raise ValidationError("No valid fields to update")
 
     current = get_current_state(request_id)
-    if not current:
+    master = get_master(request_id)
+    if not current or not master:
         raise NotFoundError(f"Request {request_id} not found")
 
     if RequestStatus.is_terminal(RequestStatus(current["status"])):
@@ -66,5 +73,23 @@ def execute(request_id: str, body: dict, idempotency_key: str | None = None, exp
         )
     except Exception:
         logger.exception("Failed to publish citizen-updated event")
+
+    try:
+        updated_request = apply_patch_updates_to_master(master, updates)
+        header = publish_prioritization_re_evaluation(
+            request_data=updated_request,
+            correlation_id=current.get("lastPrioritizationMessageId"),
+        )
+        if header:
+            update_current_fields(
+                request_id=request_id,
+                updates={
+                    "lastPrioritizationMessageId": header["messageId"],
+                    "lastPrioritizationMessageType": header["messageType"],
+                    "lastPrioritizationSentAt": header["sentAt"],
+                },
+            )
+    except Exception:
+        logger.exception("Failed to publish prioritization re-evaluation event")
 
     return result

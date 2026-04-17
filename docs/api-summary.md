@@ -19,6 +19,7 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [GET /citizen/rescue-requests/{requestId}/status](#63-get-citizenrescue-requestsrequestidstatus)
    - [POST /citizen/rescue-requests/{requestId}/updates](#64-post-citizenrescue-requestsrequestidupdates)
    - [GET /citizen/rescue-requests/{requestId}/updates](#65-get-citizenrescue-requestsrequestidupdates)
+   - [GET /incidents](#66-get-incidents)
 7. [Staff Endpoints](#7-staff-endpoints)
    - [GET /rescue-requests/{requestId}](#71-get-rescue-requestsrequestid)
    - [PATCH /rescue-requests/{requestId}](#72-patch-rescue-requestsrequestid)
@@ -35,7 +36,7 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [POST /rescue-requests/{requestId}/resolve](#84-post-rescue-requestsrequestidresolve)
    - [POST /rescue-requests/{requestId}/cancel](#85-post-rescue-requestsrequestidcancel)
 9. [State Machine](#9-state-machine)
-10. [Async Events (SNS)](#10-async-events-sns)
+10. [Async Integrations](#10-async-integrations)
 11. [Idempotency](#11-idempotency)
 12. [Duplicate Detection](#12-duplicate-detection)
 
@@ -44,6 +45,9 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
 ## 1. Overview
 
 The Rescue Request Service provides a REST API for managing disaster rescue requests.
+It also exposes a local incident catalog for request creation. That catalog is refreshed
+asynchronously from IncidentTracking Service every 30 minutes, while the API itself reads
+from the service database snapshot.
 
 | API Group | Audience | Auth Required |
 |-----------|----------|---------------|
@@ -177,7 +181,7 @@ the same incident, phone, request type, approximate location, and submission tim
 | Body | `contactName` | string | **Yes** | Primary contact's full name |
 | Body | `contactPhone` | string (7-20 chars) | **Yes** | Contact phone number. Current validation accepts digits, spaces, `+`, `-`, and parentheses. |
 | Body | `sourceChannel` | SourceChannel | **Yes** | Submission channel |
-| Body | `specialNeeds` | string \| null | No | Medical/mobility requirements |
+| Body | `specialNeeds` | string \| string[] \| null | No | Medical/mobility requirements. The current implementation stores the provided value as-is for create/PATCH flows. |
 | Body | `locationDetails` | string \| null | No | Additional location hints |
 | Body | `province` | string \| null | No | Province / region |
 | Body | `district` | string \| null | No | District |
@@ -341,7 +345,7 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
 | `nextSuggestedAction` | string \| null | Suggested action for the citizen |
 | `description` | string \| null | Original request description |
 | `peopleCount` | integer \| null | Latest known affected people count |
-| `specialNeeds` | string \| null | Special-needs details |
+| `specialNeeds` | string \| string[] \| null | Special-needs details |
 | `submittedAt` | ISO-8601 \| null | Initial submission time |
 | `lastCitizenUpdateAt` | ISO-8601 \| null | Last citizen update timestamp |
 | `contactName` | string \| null | Contact name on the request |
@@ -442,6 +446,59 @@ Returns a paginated list of all citizen-submitted updates for a rescue request.
 
 ---
 
+### 6.6 GET /incidents
+
+Returns the locally stored incident catalog used by clients when selecting an incident.
+
+This endpoint reads from the service database, not from IncidentTracking Service inline.
+The catalog is refreshed asynchronously every 30 minutes, so temporary upstream sync
+failures do not block client reads.
+
+#### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | 20 | Max results (1–100) |
+| `cursor` | string | — | Pagination cursor |
+| `status` | string | — | Filter by the locally stored incident status snapshot |
+
+#### Response `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "incidentId": "019C774D-1AC5-758B-AE95-5CD4AEB89258",
+      "incidentType": "fire",
+      "incidentName": "IncidentA",
+      "incidentSequence": 1,
+      "status": "REPORTED",
+      "incidentDescription": "Fire reported near TU Dome (Verified)",
+      "remoteCreatedAt": "2026-02-22T00:00:00Z",
+      "remoteUpdatedAt": "2026-02-22T00:01:04Z",
+      "lastSyncedAt": "2026-04-17T08:30:00+00:00"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `incidentId` | string | Incident ID from IncidentTracking Service |
+| `incidentType` | string \| null | Incident category |
+| `incidentName` | string | Stable local display name, generated as `IncidentA`, `IncidentB`, `IncidentC`, ... |
+| `incidentSequence` | integer | Sequence number used to derive `incidentName` |
+| `status` | string \| null | Latest incident status stored in the local catalog |
+| `incidentDescription` | string \| null | Incident description from upstream |
+| `remoteCreatedAt` | ISO-8601 \| null | Upstream incident creation time, if present |
+| `remoteUpdatedAt` | ISO-8601 \| null | Upstream incident update time, if present |
+| `lastSyncedAt` | ISO-8601 \| null | Last successful refresh time for this row |
+
+**Error responses:** `400` (invalid pagination), `500`
+
+---
+
 ## 7. Staff Endpoints
 
 ### 7.1 GET /rescue-requests/{requestId}
@@ -494,7 +551,15 @@ Optionally embeds the status-event history.
     "assignedAt": "2024-01-15T11:00:00.000000+00:00",
     "latestNote": "Team dispatched, ETA 15 minutes",
     "lastUpdatedBy": "dispatcher-01",
-    "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+    "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
+    "lastPrioritizationMessageId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+    "lastPrioritizationMessageType": "RescueRequestReEvaluateEvent",
+    "lastPrioritizationSentAt": "2026-04-17T00:03:00+00:00",
+    "latestPriorityEvaluationId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+    "latestPriorityReason": "Children and bedridden residents need urgent rescue.",
+    "latestPriorityEvaluatedAt": "2026-04-17T00:04:30+00:00",
+    "latestPriorityCorrelationId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+    "lastPriorityIngestedAt": "2026-04-17T00:05:00+00:00"
   },
   "updateItems": [
     {
@@ -511,6 +576,9 @@ Optionally embeds the status-event history.
 
 When `includeEvents=true` an `"events"` array is added.
 When `includeCitizenUpdates=true` a `"citizenUpdates"` array is also returned as a backward-compatible alias of `updateItems`.
+`master.specialNeeds` can currently be a string, an array of strings, or `null`.
+`currentState` also includes outbound prioritization message metadata and the latest
+ingested evaluation metadata when available.
 
 **Error responses:** `404`
 
@@ -521,6 +589,9 @@ When `includeCitizenUpdates=true` a `"citizenUpdates"` array is also returned as
 Partially updates the master record of a rescue request.
 
 **Allowed fields:** `description`, `peopleCount`, `specialNeeds`, `locationDetails`, `addressLine`
+
+`specialNeeds` is not strictly shape-validated by the current PATCH implementation, so
+existing records may contain a string, an array of strings, or `null`.
 
 **Forbidden fields:** `incidentId`, `status`, `requestId` — returning these in the body causes `422`.
 
@@ -655,9 +726,21 @@ Returns the latest state snapshot for a rescue request.
   "assignedAt": "2024-01-15T11:00:00.000000+00:00",
   "latestNote": "Team dispatched, ETA 15 minutes",
   "lastUpdatedBy": "staff-001",
-  "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+  "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
+  "lastPrioritizationMessageId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+  "lastPrioritizationMessageType": "RescueRequestReEvaluateEvent",
+  "lastPrioritizationSentAt": "2026-04-17T00:03:00+00:00",
+  "latestPriorityEvaluationId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+  "latestPriorityReason": "Children and bedridden residents need urgent rescue.",
+  "latestPriorityEvaluatedAt": "2026-04-17T00:04:30+00:00",
+  "latestPriorityCorrelationId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+  "lastPriorityIngestedAt": "2026-04-17T00:05:00+00:00"
 }
 ```
+
+Prioritization-related fields on `currentState`:
+- `lastPrioritizationMessageId`, `lastPrioritizationMessageType`, `lastPrioritizationSentAt` track the most recent outbound prioritization message published by this service.
+- `latestPriorityEvaluationId`, `latestPriorityReason`, `latestPriorityEvaluatedAt`, `latestPriorityCorrelationId`, `lastPriorityIngestedAt` track the latest evaluated result ingested back into the request.
 
 **Error responses:** `404`
 
@@ -714,7 +797,15 @@ Each item is the master request record enriched with the latest `status` and a
         "assignedAt": "2024-01-15T11:00:00.000000+00:00",
         "latestNote": "Team dispatched, ETA 15 minutes",
         "lastUpdatedBy": "dispatcher-01",
-        "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+        "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
+        "lastPrioritizationMessageId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+        "lastPrioritizationMessageType": "RescueRequestReEvaluateEvent",
+        "lastPrioritizationSentAt": "2026-04-17T00:03:00+00:00",
+        "latestPriorityEvaluationId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+        "latestPriorityReason": "Children and bedridden residents need urgent rescue.",
+        "latestPriorityEvaluatedAt": "2026-04-17T00:04:30+00:00",
+        "latestPriorityCorrelationId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+        "lastPriorityIngestedAt": "2026-04-17T00:05:00+00:00"
       }
     }
   ],
@@ -821,6 +912,8 @@ When `priorityScore` changes, the service publishes a
 
 All command endpoints share the same response shape ([StatusTransitionResponse](#statustransitionresponse))
 and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
+If `changedBy` or `changedByRole` is omitted on command endpoints, the current implementation
+defaults both values to `"staff"`.
 
 ### StatusTransitionResponse
 
@@ -967,7 +1060,7 @@ Attempting to transition from a terminal state (`RESOLVED` or `CANCELLED`) also 
 
 ---
 
-## 10. Async Events (SNS)
+## 10. Async Integrations
 
 **Topic:** `rescue-request-events-v1-{stage}`
 
@@ -1017,6 +1110,47 @@ That relay shape is internal-only and should not be treated as a public contract
 
 > **Note:** Event publishing is non-blocking — a failure to publish does **not** cause the
 > HTTP request to fail.
+
+### Prioritization Channels
+
+The service also publishes prioritization messages for async scoring:
+
+| Logical Channel | Trigger | Physical AWS Topic Name |
+|-----------------|---------|-------------------------|
+| `rescue.prioritization.commands.v1` | New rescue request created | `rescue-prioritization-commands-v1-{stage}` |
+| `rescue.prioritization.updated.v1` | Staff PATCH or citizen updates that affect prioritization (`PEOPLE_COUNT`, `SPECIAL_NEEDS`, `LOCATION_DETAILS`) | `rescue-prioritization-updated-v1-{stage}` |
+
+These publishes are also non-blocking. Failures are logged but do not fail the HTTP request.
+
+### Prioritization Result Ingest
+
+The service consumes evaluated results from Prioritization Service through a dedicated SQS queue.
+When an evaluated message is accepted, the request `currentState` is updated with:
+
+- `priorityScore`
+- `priorityLevel`
+- `latestPriorityEvaluationId`
+- `latestPriorityReason`
+- `latestPriorityEvaluatedAt`
+- `latestPriorityCorrelationId`
+- `lastPriorityIngestedAt`
+
+The ingested `correlationId` must match the latest outbound prioritization `messageId`
+stored on the request, which prevents stale evaluations from overwriting newer state.
+
+### Incident Catalog Sync
+
+Incident data is synced from IncidentTracking Service into a dedicated local table:
+
+- Trigger: Amazon EventBridge schedule every 30 minutes
+- Lambda timeout: 30 seconds
+- External HTTP timeout: 30 seconds
+- Secret source: AWS Secrets Manager secret `rescue-request-service/incident-tracking/{stage}`
+- Required secret keys: `apiUrl`, `apiKey`
+- Optional secret keys: `accept`, `transactionIdHeader`
+
+`GET /incidents` reads only from the local table, so client reads remain available even if
+the upstream sync fails or times out.
 
 ---
 
