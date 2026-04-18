@@ -6,9 +6,8 @@ from src.adapters.persistence.rescue_request_repository import (
     update_current_fields,
     update_master_fields,
 )
-from src.application.services.event_publisher import publish_citizen_updated, publish_prioritization_re_evaluation
+from src.application.services.event_publisher import publish_citizen_updated
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
-from src.application.services.prioritization_contract import apply_patch_updates_to_master
 from src.domain.enums.request_status import RequestStatus
 from src.shared.errors import ConflictError, NotFoundError, ValidationError
 from src.shared.logger import get_logger
@@ -65,31 +64,22 @@ def execute(request_id: str, body: dict, idempotency_key: str | None = None, exp
         )
 
     try:
-        publish_citizen_updated(
+        header = publish_citizen_updated(
             request_id=request_id,
             update_id="patch",
             update_type="PATCH",
             update_payload=updates,
         )
-    except Exception:
-        logger.exception("Failed to publish citizen-updated event")
-
-    try:
-        updated_request = apply_patch_updates_to_master(master, updates)
-        header = publish_prioritization_re_evaluation(
-            request_data=updated_request,
-            correlation_id=current.get("lastPrioritizationMessageId"),
-        )
         if header:
             update_current_fields(
                 request_id=request_id,
                 updates={
-                    "lastPrioritizationMessageId": header["messageId"],
-                    "lastPrioritizationMessageType": header["messageType"],
-                    "lastPrioritizationSentAt": header["sentAt"],
+                    "latestPrioritySourceEventId": header["messageId"],
+                    "latestPrioritySourceEventType": header["eventType"],
+                    "latestPrioritySourceOccurredAt": header["occurredAt"],
                 },
             )
     except Exception:
-        logger.exception("Failed to publish prioritization re-evaluation event")
+        logger.exception("Failed to publish citizen-updated event")
 
     return result

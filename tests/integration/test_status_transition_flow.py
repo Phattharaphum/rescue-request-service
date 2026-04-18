@@ -109,7 +109,7 @@ class TestStatusTransitionFlow:
             _build_command_event(request_id, {
                 "changedBy": "staff-001",
                 "changedByRole": "dispatcher",
-                "priorityScore": 8.5,
+                "priorityScore": 0.85,
                 "priorityLevel": "HIGH",
             }),
             None,
@@ -188,15 +188,6 @@ class TestStatusTransitionFlow:
     def test_assign_without_responder_unit_fails(self):
         request_id = _create_request()
 
-        # First triage
-        triage_handler(
-            _build_command_event(request_id, {
-                "changedBy": "staff-001",
-                "changedByRole": "dispatcher",
-            }),
-            None,
-        )
-
         # Assign without responderUnitId
         response = assign_handler(
             _build_command_event(request_id, {
@@ -206,6 +197,39 @@ class TestStatusTransitionFlow:
             None,
         )
         assert response["statusCode"] == 422
+
+    def test_assign_from_submitted_succeeds(self):
+        request_id = _create_request()
+
+        response = assign_handler(
+            _build_command_event(request_id, {
+                "changedBy": "staff-001",
+                "changedByRole": "dispatcher",
+                "responderUnitId": "unit-direct",
+                "priorityScore": 0.9,
+                "priorityLevel": "CRITICAL",
+            }),
+            None,
+        )
+        assert response["statusCode"] == 200
+        result = json.loads(response["body"])
+        assert result["previousStatus"] == "SUBMITTED"
+        assert result["newStatus"] == "ASSIGNED"
+
+        get_event = {
+            "httpMethod": "GET",
+            "headers": {},
+            "body": None,
+            "pathParameters": {"requestId": request_id},
+            "queryStringParameters": None,
+        }
+        current_response = get_current_handler(get_event, None)
+        assert current_response["statusCode"] == 200
+        current = json.loads(current_response["body"])
+        assert current["status"] == "ASSIGNED"
+        assert current["assignedUnitId"] == "unit-direct"
+        assert current["priorityScore"] == 0.9
+        assert current["priorityLevel"] == "CRITICAL"
 
     def test_cancel_without_reason_fails(self):
         request_id = _create_request()

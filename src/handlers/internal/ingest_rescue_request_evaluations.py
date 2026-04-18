@@ -1,5 +1,6 @@
 from src.adapters.messaging.prioritization_parser import parse_prioritization_record
 from src.application.usecases import ingest_rescue_request_evaluation
+from src.shared.errors import ValidationError
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -13,6 +14,17 @@ def handler(event, context):
         try:
             message = parse_prioritization_record(record)
             ingest_rescue_request_evaluation.execute(message)
+        except ValidationError as exc:
+            logger.error(
+                "Failed to ingest RescueRequestEvaluatedEvent due to validation error",
+                extra={
+                    "extra_data": {
+                        "recordMessageId": record.get("messageId"),
+                        "validationDetails": exc.details,
+                    }
+                },
+            )
+            batch_failures.append({"itemIdentifier": record.get("messageId", "")})
         except Exception:
             logger.exception("Failed to ingest RescueRequestEvaluatedEvent")
             batch_failures.append({"itemIdentifier": record.get("messageId", "")})

@@ -105,7 +105,7 @@ class TestUpdatePriorityFlow:
         patch_response = _update_priority(
             request_id,
             {
-                "priorityScore": 91.5,
+                "priorityScore": 0.915,
                 "priorityLevel": "CRITICAL",
                 "note": "Escalated after reassessment",
             },
@@ -113,7 +113,7 @@ class TestUpdatePriorityFlow:
         assert patch_response["statusCode"] == 200
         patch_result = json.loads(patch_response["body"])
         assert patch_result["requestId"] == request_id
-        assert patch_result["priorityScore"] == 91.5
+        assert patch_result["priorityScore"] == 0.915
         assert patch_result["priorityLevel"] == "CRITICAL"
         assert patch_result["note"] == "Escalated after reassessment"
         assert patch_result["updated"] == ["priorityScore", "priorityLevel", "note"]
@@ -128,7 +128,7 @@ class TestUpdatePriorityFlow:
         current_response = get_current_handler(get_event, None)
         assert current_response["statusCode"] == 200
         current = json.loads(current_response["body"])
-        assert current["priorityScore"] == 91.5
+        assert current["priorityScore"] == 0.915
         assert current["priorityLevel"] == "CRITICAL"
         assert current["latestNote"] == "Escalated after reassessment"
 
@@ -136,7 +136,20 @@ class TestUpdatePriorityFlow:
         request_id = _create_request()
         response = _update_priority(
             request_id=request_id,
-            body={"priorityScore": 75.0},
+            body={"priorityScore": 0.75},
             headers={"If-Match": "999"},
         )
         assert response["statusCode"] == 409
+
+    def test_invalid_if_match_returns_standard_bad_request(self):
+        request_id = _create_request()
+        response = _update_priority(
+            request_id=request_id,
+            body={"priorityScore": 0.75},
+            headers={"If-Match": "abc"},
+        )
+
+        assert response["statusCode"] == 400
+        result = json.loads(response["body"])
+        assert result["errorCode"] == "BAD_REQUEST"
+        assert result["details"] == [{"field": "If-Match", "issue": "must be a valid integer"}]

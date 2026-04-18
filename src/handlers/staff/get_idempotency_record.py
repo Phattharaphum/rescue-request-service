@@ -1,12 +1,12 @@
 from src.application.usecases import get_idempotency_record
-from src.handlers.handler_utils import cors_handler, get_path_param, get_query_param, handle_error
+from src.handlers.handler_utils import cors_handler, get_query_param, handle_error, require_path_param
 from src.shared.response import ok
 
 
 @cors_handler
 def handler(event, context):
     try:
-        key_hash = get_path_param(event, "idempotencyKeyHash")
+        key_hash = require_path_param(event, "idempotencyKeyHash")
         include_response = get_query_param(event, "includeResponse", "false").lower() == "true"
         include_fingerprint = get_query_param(event, "includeRequestFingerprint", "false").lower() == "true"
 
@@ -15,7 +15,7 @@ def handler(event, context):
             include_response=include_response,
             include_fingerprint=include_fingerprint,
         )
-        return ok(result)
+        return ok(result, event)
     except Exception as e:
         return handle_error(e, event)
 

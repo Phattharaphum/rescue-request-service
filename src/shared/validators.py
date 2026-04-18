@@ -68,3 +68,24 @@ def validate_pagination(limit: Any = None, cursor: Any = None) -> tuple[int, str
             raise BadRequestError("limit must be a valid integer")
     parsed_cursor = cursor if cursor else None
     return parsed_limit, parsed_cursor
+
+
+def parse_optional_int(value: Any, field_name: str, minimum: int | None = None) -> int | None:
+    if value is None or value == "":
+        return None
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise BadRequestError(
+            f"{field_name} must be a valid integer",
+            [{"field": field_name, "issue": "must be a valid integer"}],
+        )
+
+    if minimum is not None and parsed < minimum:
+        raise BadRequestError(
+            f"{field_name} must be greater than or equal to {minimum}",
+            [{"field": field_name, "issue": f"must be greater than or equal to {minimum}"}],
+        )
+
+    return parsed

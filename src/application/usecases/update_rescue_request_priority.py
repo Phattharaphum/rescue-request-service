@@ -153,6 +153,8 @@ def _validate_body(body: dict[str, Any]) -> list[dict[str, str]]:
                 errors.append({"field": "priorityScore", "issue": "must be a number or null"})
             elif not math.isfinite(float(priority_score)):
                 errors.append({"field": "priorityScore", "issue": "must be a finite number"})
+            elif float(priority_score) < 0 or float(priority_score) > 1:
+                errors.append({"field": "priorityScore", "issue": "must be between 0 and 1"})
 
     if "priorityLevel" in body and not _is_nullable_non_empty_text(body.get("priorityLevel")):
         errors.append({"field": "priorityLevel", "issue": "must be a non-empty string or null"})

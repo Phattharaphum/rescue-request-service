@@ -10,7 +10,7 @@ from src.adapters.persistence.rescue_request_repository import (
 from src.adapters.utils.hashing import hash_phone, hash_tracking_code
 from src.adapters.utils.phone_normalizer import normalize_phone
 from src.application.services.duplicate_detection_service import detect_duplicate, get_duplicate_signature
-from src.application.services.event_publisher import publish_prioritization_command, publish_request_created
+from src.application.services.event_publisher import publish_request_created
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
 from src.domain.enums.request_status import RequestStatus
 from src.domain.enums.request_type import RequestType
@@ -139,9 +139,9 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
         "latestNote": None,
         "lastUpdatedBy": "system",
         "lastUpdatedAt": now,
-        "lastPrioritizationMessageId": None,
-        "lastPrioritizationMessageType": None,
-        "lastPrioritizationSentAt": None,
+        "latestPrioritySourceEventId": None,
+        "latestPrioritySourceEventType": None,
+        "latestPrioritySourceOccurredAt": None,
         "latestPriorityEvaluationId": None,
         "latestPriorityReason": None,
         "latestPriorityEvaluatedAt": None,
@@ -239,23 +239,18 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
         )
 
     try:
-        publish_request_created(request_id=request_id, request_data=master_item, correlation_id=request_id)
-    except Exception:
-        logger.exception("Failed to publish request created event")
-
-    try:
-        header = publish_prioritization_command(request_data=master_item)
+        header = publish_request_created(request_id=request_id, request_data=master_item, correlation_id=request_id)
         if header:
             update_current_fields(
                 request_id=request_id,
                 updates={
-                    "lastPrioritizationMessageId": header["messageId"],
-                    "lastPrioritizationMessageType": header["messageType"],
-                    "lastPrioritizationSentAt": header["sentAt"],
+                    "latestPrioritySourceEventId": header["messageId"],
+                    "latestPrioritySourceEventType": header["eventType"],
+                    "latestPrioritySourceOccurredAt": header["occurredAt"],
                 },
             )
     except Exception:
-        logger.exception("Failed to publish prioritization command")
+        logger.exception("Failed to publish request created event")
 
     return result
 

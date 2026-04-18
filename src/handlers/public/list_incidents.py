@@ -13,6 +13,6 @@ def handler(event, context):
         )
         status = get_query_param(event, "status")
         result = list_incidents.execute(limit=limit, cursor=cursor, status=status)
-        return ok(result)
+        return ok(result, event)
     except Exception as exc:
         return handle_error(exc, event)

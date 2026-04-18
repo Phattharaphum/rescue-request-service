@@ -22,7 +22,7 @@ def publish_event(
     partition_key: str,
     correlation_id: str | None = None,
     trace_id: str | None = None,
-) -> None:
+) -> dict | None:
     try:
         envelope = build_envelope(
             event_type=event_type,
@@ -48,5 +48,7 @@ def publish_event(
             logger.info(f"Published event {event_type} for {partition_key}")
         else:
             logger.warning(f"SNS_TOPIC_ARN not set, skipping publish for {event_type}")
+        return envelope["header"]
     except Exception:
         logger.exception(f"Failed to publish event {event_type}")
+        return None

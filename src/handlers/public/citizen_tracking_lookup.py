@@ -11,7 +11,7 @@ def handler(event, context):
             contact_phone=body.get("contactPhone", ""),
             tracking_code=body.get("trackingCode", ""),
         )
-        return ok(result)
+        return ok(result, event)
     except Exception as e:
         return handle_error(e, event)
 

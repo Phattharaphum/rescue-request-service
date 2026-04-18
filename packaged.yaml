@@ -9,14 +9,22 @@ Parameters:
     - dev
     - prod
     - local
-  PrioritizationEvaluatedTopicArn:
+  PrioritizationCreatedTopicArn:
+    Type: String
+    Default: ''
+  PrioritizationUpdatedTopicArn:
     Type: String
     Default: ''
 Conditions:
-  HasPrioritizationEvaluatedTopicArn:
+  HasPrioritizationCreatedTopicArn:
     Fn::Not:
     - Fn::Equals:
-      - Ref: PrioritizationEvaluatedTopicArn
+      - Ref: PrioritizationCreatedTopicArn
+      - ''
+  HasPrioritizationUpdatedTopicArn:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: PrioritizationUpdatedTopicArn
       - ''
 Globals:
   Function:
@@ -35,10 +43,6 @@ Globals:
           Ref: IncidentCatalogTable
         SNS_TOPIC_ARN:
           Ref: RescueRequestEventsTopic
-        PRIORITIZATION_COMMANDS_TOPIC_ARN:
-          Ref: RescuePrioritizationCommandsTopic
-        PRIORITIZATION_REEVALUATE_TOPIC_ARN:
-          Ref: RescuePrioritizationUpdatesTopic
         ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: INFO
         INCIDENT_SYNC_SECRET_ID:
@@ -135,20 +139,6 @@ Resources:
         Fn::Sub: rescue-request-events-v1-${Stage}
     Metadata:
       SamResourceId: RescueRequestEventsTopic
-  RescuePrioritizationCommandsTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName:
-        Fn::Sub: rescue-prioritization-commands-v1-${Stage}
-    Metadata:
-      SamResourceId: RescuePrioritizationCommandsTopic
-  RescuePrioritizationUpdatesTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName:
-        Fn::Sub: rescue-prioritization-updated-v1-${Stage}
-    Metadata:
-      SamResourceId: RescuePrioritizationUpdatesTopic
   IncidentTrackingApiSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -229,7 +219,7 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Sid: AllowPrioritizationTopicPublish
+        - Sid: AllowPrioritizationCreatedTopicPublish
           Effect: Allow
           Principal: '*'
           Action: sqs:SendMessage
@@ -241,24 +231,52 @@ Resources:
             ArnLike:
               aws:SourceArn:
                 Fn::If:
-                - HasPrioritizationEvaluatedTopicArn
-                - Ref: PrioritizationEvaluatedTopicArn
+                - HasPrioritizationCreatedTopicArn
+                - Ref: PrioritizationCreatedTopicArn
                 - Fn::Sub: arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:rescue-prioritization-created-v1*
+        - Sid: AllowPrioritizationUpdatedTopicPublish
+          Effect: Allow
+          Principal: '*'
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - RescuePrioritizationEvaluatedQueue
+            - Arn
+          Condition:
+            ArnLike:
+              aws:SourceArn:
+                Fn::If:
+                - HasPrioritizationUpdatedTopicArn
+                - Ref: PrioritizationUpdatedTopicArn
+                - Fn::Sub: arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:rescue-prioritization-updated-v1*
     Metadata:
       SamResourceId: RescuePrioritizationEvaluatedQueuePolicy
-  RescuePrioritizationEvaluatedSubscription:
+  RescuePrioritizationCreatedSubscription:
     Type: AWS::SNS::Subscription
-    Condition: HasPrioritizationEvaluatedTopicArn
+    Condition: HasPrioritizationCreatedTopicArn
     Properties:
       TopicArn:
-        Ref: PrioritizationEvaluatedTopicArn
+        Ref: PrioritizationCreatedTopicArn
       Protocol: sqs
       Endpoint:
         Fn::GetAtt:
         - RescuePrioritizationEvaluatedQueue
         - Arn
     Metadata:
-      SamResourceId: RescuePrioritizationEvaluatedSubscription
+      SamResourceId: RescuePrioritizationCreatedSubscription
+  RescuePrioritizationUpdatedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasPrioritizationUpdatedTopicArn
+    Properties:
+      TopicArn:
+        Ref: PrioritizationUpdatedTopicArn
+      Protocol: sqs
+      Endpoint:
+        Fn::GetAtt:
+        - RescuePrioritizationEvaluatedQueue
+        - Arn
+    Metadata:
+      SamResourceId: RescuePrioritizationUpdatedSubscription
   RescueRequestApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -287,11 +305,6 @@ Resources:
           TopicName:
             Fn::GetAtt:
             - RescueRequestEventsTopic
-            - TopicName
-      - SNSPublishMessagePolicy:
-          TopicName:
-            Fn::GetAtt:
-            - RescuePrioritizationCommandsTopic
             - TopicName
       Events:
         Api:
@@ -322,6 +335,25 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: ListIncidentsFunction
+  InternalListIncidentCatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.list_incident_catalog.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IncidentCatalogTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/internal/incidents/catalog
+            Method: GET
+    Metadata:
+      SamResourceId: InternalListIncidentCatalogFunction
   CitizenTrackingLookupFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -376,11 +408,6 @@ Resources:
           TopicName:
             Fn::GetAtt:
             - RescueRequestEventsTopic
-            - TopicName
-      - SNSPublishMessagePolicy:
-          TopicName:
-            Fn::GetAtt:
-            - RescuePrioritizationUpdatesTopic
             - TopicName
       Events:
         Api:
@@ -446,11 +473,6 @@ Resources:
           TopicName:
             Fn::GetAtt:
             - RescueRequestEventsTopic
-            - TopicName
-      - SNSPublishMessagePolicy:
-          TopicName:
-            Fn::GetAtt:
-            - RescuePrioritizationUpdatesTopic
             - TopicName
       Events:
         Api:
@@ -880,14 +902,6 @@ Outputs:
     Description: SNS topic ARN
     Value:
       Ref: RescueRequestEventsTopic
-  RescuePrioritizationCommandsTopicArn:
-    Description: SNS topic ARN for outbound prioritization commands
-    Value:
-      Ref: RescuePrioritizationCommandsTopic
-  RescuePrioritizationUpdatesTopicArn:
-    Description: SNS topic ARN for outbound prioritization re-evaluation events
-    Value:
-      Ref: RescuePrioritizationUpdatesTopic
   SQSQueueUrl:
     Description: SQS queue URL subscribed to rescue request events topic
     Value:

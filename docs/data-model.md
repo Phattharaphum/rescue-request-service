@@ -94,14 +94,22 @@ Single-table design with composite primary key:
 - `latestNote`
 - `lastUpdatedBy`
 - `lastUpdatedAt`
-- `lastPrioritizationMessageId`
-- `lastPrioritizationMessageType`
-- `lastPrioritizationSentAt`
+- `latestPrioritySourceEventId`
+- `latestPrioritySourceEventType`
+- `latestPrioritySourceOccurredAt`
 - `latestPriorityEvaluationId`
 - `latestPriorityReason`
 - `latestPriorityEvaluatedAt`
 - `latestPriorityCorrelationId`
 - `lastPriorityIngestedAt`
+
+Notes:
+
+- `latestPrioritySourceEventId`, `latestPrioritySourceEventType`, and `latestPrioritySourceOccurredAt`
+  are internal correlation-tracking fields used to validate inbound prioritization results against
+  the latest service-owned source event published on `rescue-request-events-v1-{stage}`.
+- These source-event tracking fields are stored in DynamoDB but are intentionally filtered out of
+  public/staff REST responses.
 
 #### `STATUS_EVENT`
 

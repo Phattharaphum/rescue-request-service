@@ -17,7 +17,7 @@ def handler(event, context):
             client_ip=client_ip,
             user_agent=user_agent,
         )
-        return created(result)
+        return created(result, event)
     except Exception as e:
         return handle_error(e, event)
 

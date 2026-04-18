@@ -1,164 +1,222 @@
-# Prioritization And Incident Sync
+# Prioritization Result Ingest And Incident Sync
 
 ## Overview
 
-This document describes the two new integrations added to the Rescue Request Service:
+This document describes the two async integrations currently active in Rescue Request Service:
 
-1. asynchronous prioritization with Rescue Prioritization Service
-2. incident catalog synchronization from IncidentTracking Service
+1. service-owned domain event publishing on `rescue-request-events-v1-{stage}`
+2. inbound prioritization-result ingest plus incident catalog sync
 
-The implementation keeps the main rescue-request APIs independent from both integrations.
-User-facing flows continue to read primarily from DynamoDB.
+The REST API remains database-first. Client reads do not call Prioritization Service or
+IncidentTracking Service inline.
 
-## What Was Added
+## Service-Owned Async Surface
 
-### Prioritization integration
+### Topic
 
-- Logical channel names still follow the async contract:
-  - `rescue.prioritization.commands.v1`
-  - `rescue.prioritization.updated.v1`
-- AWS SNS physical topic names use hyphens because SNS topic names do not allow `.`:
-- New SNS topic for initial prioritize requests:
-  - `rescue-prioritization-commands-v1-{stage}`
-- New SNS topic for re-evaluation requests:
-  - `rescue-prioritization-updated-v1-{stage}`
-- New SQS queue for evaluated results:
-  - `rescue-prioritization-evaluated-{stage}`
-- New DLQ for failed result ingestion:
-  - `rescue-prioritization-evaluated-dlq-{stage}`
-- New Lambda consumer:
-  - `src.handlers.internal.ingest_rescue_request_evaluations.handler`
+- `rescue-request-events-v1-{stage}`
 
-### Incident sync integration
+This service publishes only its own rescue-request domain events to that SNS topic.
+It does not create or own outbound prioritization command topics.
 
-- New DynamoDB table:
-  - `IncidentCatalogTable-{stage}`
-- New scheduled Lambda:
-  - `src.handlers.internal.sync_incidents.handler`
-- EventBridge schedule:
-  - `rate(30 minutes)`
-- Lambda timeout:
-  - `30` seconds
+### Published Events
 
-## Runtime Flow
+| Event Type | Trigger | Body Fields |
+|------------|---------|-------------|
+| `rescue-request.created` | New request created | `requestId`, `data` |
+| `rescue-request.status-changed` | Any state transition | `requestId`, `previousStatus`, `newStatus`, `eventId`, `version` |
+| `rescue-request.citizen-updated` | Citizen update or staff PATCH edit | Citizen update: `requestId`, `updateId`, `updateType`, `updatePayload`, `createdAt`; PATCH: `requestId`, `updateId="patch"`, `updateType="PATCH"`, `updatePayload` |
+| `rescue-request.priority-score-updated` | Staff priority sync API updates score | `requestId`, `previousPriorityScore`, `newPriorityScore`, optional `priorityLevel`, optional `note`, optional `updatedAt` |
+| `rescue-request.resolved` | Request resolved | `requestId`, `eventId` |
+| `rescue-request.cancelled` | Request cancelled | `requestId`, `eventId`, `reason` |
 
-### 1. Initial prioritization
+### SNS Envelope
 
-When `POST /v1/rescue-requests` succeeds:
-
-- the rescue request is stored in DynamoDB
-- the existing internal SNS event is still published
-- a `RescueRequestPrioritizeCommand` is published on logical channel `rescue.prioritization.commands.v1`
-- the backing AWS topic created by this stack is `rescue-prioritization-commands-v1-{stage}`
-- the latest outbound prioritization message metadata is stored in `CURRENT_STATE`
-
-### 2. Re-evaluation
-
-When a request is updated in a way that can affect priority:
-
-- `PATCH /v1/rescue-requests/{requestId}`
-- citizen update types `PEOPLE_COUNT`, `SPECIAL_NEEDS`, `LOCATION_DETAILS`
-
-the service publishes `RescueRequestReEvaluateEvent` on logical channel `rescue.prioritization.updated.v1` using the latest request snapshot.
-The backing AWS topic created by this stack is `rescue-prioritization-updated-v1-{stage}`.
-
-### 3. Evaluated score ingestion
-
-When a `RescueRequestEvaluatedEvent` arrives through the SQS queue:
-
-- the message is validated
-- `evaluateId` is used as the idempotency key
-- the service updates `CURRENT_STATE.priorityScore`
-- the service updates `CURRENT_STATE.priorityLevel`
-- the service stores evaluation metadata:
-  - `latestPriorityEvaluationId`
-  - `latestPriorityReason`
-  - `latestPriorityEvaluatedAt`
-  - `latestPriorityCorrelationId`
-  - `lastPriorityIngestedAt`
-
-If the request is already terminal (`RESOLVED` or `CANCELLED`), the message is acknowledged and skipped.
-
-## Incident Catalog Flow
-
-`SyncIncidentCatalogFunction` reads IncidentTracking Service through Secrets Manager configuration, then upserts records into `IncidentCatalogTable-{stage}`.
-
-Stored business fields:
-
-- `incidentId`
-- `incidentType`
-- `incidentName`
-- `status`
-- `incidentDescription`
-
-Additional metadata stored for ordering and operations:
-
-- `incidentSequence`
-- `remoteCreatedAt`
-- `remoteUpdatedAt`
-- `lastSyncedAt`
-- `catalogPartition`
-- `catalogSortKey`
-
-### Incident naming
-
-The upstream API does not provide `incident_name`.
-
-The service therefore generates stable names in running order:
-
-- `IncidentA`
-- `IncidentB`
-- `IncidentC`
-- ...
-- `IncidentZ`
-- `IncidentAA`
-
-Existing incidents keep their original generated name on later syncs.
-
-## API Usage
-
-### List incidents for citizen/staff selection
-
-Endpoint:
-
-- `GET /v1/incidents`
-
-Query parameters:
-
-- `limit` optional, default `20`
-- `cursor` optional
-- `status` optional
-
-Example response:
+Published SNS messages use the current `header` + `body` envelope:
 
 ```json
 {
-  "items": [
-    {
-      "incidentId": "019C774D-1AC5-758B-AE95-5CD4AEB89258",
-      "incidentType": "fire",
-      "incidentName": "IncidentA",
-      "incidentSequence": 1,
-      "status": "REPORTED",
-      "incidentDescription": "Fire reported near TU Dome (Verified)",
-      "remoteCreatedAt": "2026-02-22T00:00:00Z",
-      "remoteUpdatedAt": "2026-02-22T00:01:04Z",
-      "lastSyncedAt": "2026-04-17T08:00:00+00:00"
-    }
-  ],
-  "nextCursor": null
+  "header": {
+    "messageId": "uuid",
+    "eventType": "rescue-request.created",
+    "schemaVersion": "1.0",
+    "producer": "rescue-request-service",
+    "occurredAt": "2026-04-18T00:00:00+00:00",
+    "traceId": "uuid",
+    "correlationId": "uuid",
+    "partitionKey": "request-id",
+    "contentType": "application/json"
+  },
+  "body": {}
 }
 ```
 
-## Secrets Manager Configuration
+### Internal Stream Relay
 
-The sync Lambda reads one secret from AWS Secrets Manager.
+The internal `/stream` relay may normalize or repackage events for SSE delivery.
+That relay shape is internal-only and should not be treated as a public contract.
 
-Secret name created by SAM:
+### Message Attributes
+
+The owner topic publishes these SNS message attributes for subscription filters:
+
+| Attribute | Value |
+|-----------|-------|
+| `eventType` | e.g. `rescue-request.created` |
+| `schemaVersion` | `1.0` |
+| `producer` | `rescue-request-service` |
+
+### Non-Blocking Publish
+
+Event publishing is non-blocking. A publish failure is logged but does not fail the HTTP request.
+
+## Prioritization Result Ingest
+
+### Ownership Boundary
+
+This service no longer publishes outbound prioritization command or re-evaluation topics.
+Instead, it consumes evaluated results produced externally by Rescue Prioritization Service.
+
+### Inbound Topics And Queue
+
+One shared SQS queue is used for prioritization results:
+
+- queue: `rescue-prioritization-evaluated-{stage}`
+- DLQ: `rescue-prioritization-evaluated-dlq-{stage}`
+
+That queue can subscribe to two external SNS topics:
+
+- `rescue.prioritization.created.v1`
+- `rescue.prioritization.updated.v1`
+
+`template.yaml` and `template.local.yaml` expose optional parameters:
+
+- `PrioritizationCreatedTopicArn`
+- `PrioritizationUpdatedTopicArn`
+
+If either ARN is provided, the stack creates the SNS-to-SQS subscription automatically.
+If omitted, the queue still exists and can be subscribed manually.
+
+### Canonical Inbound Contract
+
+Canonical inbound `messageType` on both topics is:
+
+- `RescueRequestEvaluatedEvent`
+
+Canonical payload:
+
+```json
+{
+  "header": {
+    "messageType": "RescueRequestEvaluatedEvent",
+    "correlationId": "uuid",
+    "sentAt": "2026-04-18T00:05:00+00:00",
+    "version": "1"
+  },
+  "body": {
+    "requestId": "REQ-8812-4444",
+    "incidentId": "8b9b6d5b-7d5e-4d0b-a7e2-2a0a6bd5c111",
+    "evaluateId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+    "requestType": "flood_rescue",
+    "priorityScore": 0.3,
+    "priorityLevel": "NORMAL",
+    "evaluateReason": "Lack of food reserves indicates a potential need for assistance.",
+    "submittedAt": "2026-03-03T08:01:12Z",
+    "lastEvaluatedAt": "2026-03-22T07:18:39.670351+00:00",
+    "description": "ไม่มีอาหารสํารอง",
+    "location": {
+      "latitude": 11.111,
+      "longitude": 11.222
+    },
+    "peopleCount": 1,
+    "specialNeeds": ["bedridden", "children"]
+  }
+}
+```
+
+### Compatibility Rule
+
+For transition compatibility only, the consumer also accepts:
+
+- `messageType = RescueRequestReEvaluateEvent`
+
+but only when the inbound topic/channel is `rescue.prioritization.updated.v1`.
+Documentation treats `RescueRequestEvaluatedEvent` as the steady-state contract.
+
+### Validation Rules
+
+Inbound result messages must satisfy:
+
+- `header.sentAt` is ISO-8601
+- `header.version` equals `1`
+- `header.correlationId` is present
+- `body.requestId` is present
+- `body.incidentId` is a valid UUID
+- `body.evaluateId` is a valid UUID
+- `body.requestType` is present
+- `body.priorityScore` is a decimal between `0` and `1`
+- `body.priorityLevel` is one of `LOW`, `NORMAL`, `HIGH`, `CRITICAL`
+- `body.evaluateReason` is present
+- `body.submittedAt` is ISO-8601
+- `body.lastEvaluatedAt` is ISO-8601
+- `body.description` is present
+- `body.peopleCount` is a positive integer
+- `body.location` exists and contains valid numeric `latitude` and `longitude`
+- `body.specialNeeds`, when present, is an array of non-empty strings
+
+### Correlation Rule
+
+`header.correlationId` must match the latest service-owned source event stored on the request:
+
+- `CURRENT_STATE.latestPrioritySourceEventId`
+
+That source event comes from the service-owned topic:
+
+- `rescue-request.created`
+- `rescue-request.citizen-updated`
+
+This prevents stale prioritization results from overwriting newer request context.
+
+### State Updates On Successful Ingest
+
+When a result is accepted, the service updates `CURRENT_STATE` with:
+
+- `priorityScore`
+- `priorityLevel`
+- `latestPriorityEvaluationId`
+- `latestPriorityReason`
+- `latestPriorityEvaluatedAt`
+- `latestPriorityCorrelationId`
+- `lastPriorityIngestedAt`
+- `lastUpdatedAt`
+- `lastUpdatedBy = "prioritization-service"`
+
+Status handling:
+
+- `SUBMITTED -> TRIAGED`
+- later non-terminal statuses are preserved
+- terminal requests are acknowledged and skipped
+
+Idempotency remains keyed by:
+
+- `RescueRequestEvaluatedEvent#{evaluateId}`
+
+## Incident Catalog Sync
+
+### Resources
+
+- DynamoDB table: `IncidentCatalogTable-{stage}`
+- Lambda: `src.handlers.internal.sync_incidents.handler`
+- EventBridge schedule: `rate(30 minutes)`
+- Lambda timeout: `30` seconds
+
+### Secret Configuration
+
+Secret name:
 
 - `rescue-request-service/incident-tracking/{stage}`
 
-Expected JSON shape:
+Expected JSON:
 
 ```json
 {
@@ -169,51 +227,90 @@ Expected JSON shape:
 }
 ```
 
-Update the secret after deployment before expecting incident sync to succeed.
+Required keys:
+
+- `apiUrl`
+- `apiKey`
+
+Optional keys:
+
+- `accept`
+- `transactionIdHeader`
+
+### Stored Fields
+
+Business fields stored in `IncidentCatalogTable`:
+
+- `incidentId`
+- `incidentType`
+- `incidentName`
+- `status`
+- `incidentDescription`
+
+Operational fields also stored:
+
+- `incidentSequence`
+- `remoteCreatedAt`
+- `remoteUpdatedAt`
+- `lastSyncedAt`
+- `catalogPartition`
+- `catalogSortKey`
+
+### Incident Naming
+
+Upstream does not provide `incident_name`, so this service generates stable running names:
+
+- `IncidentA`
+- `IncidentB`
+- `IncidentC`
+- ...
+
+Five hardmock rows are also seeded into the table for internal/testing bootstrap.
+
+### Read Path
+
+`GET /v1/incidents` reads from `IncidentCatalogTable` only.
+Temporary upstream timeouts or sync failures do not block client reads.
 
 ## Deployment Notes
 
-### Outputs added by SAM
+Relevant outputs:
 
 - `IncidentCatalogTableName`
-- `RescuePrioritizationCommandsTopicArn`
-- `RescuePrioritizationUpdatesTopicArn`
 - `RescuePrioritizationEvaluatedQueueUrl`
 - `RescuePrioritizationEvaluatedQueueArn`
 - `IncidentTrackingApiSecretArn`
 
-### Optional auto-subscription for evaluated events
-
-`template.yaml` accepts parameter:
-
-- `PrioritizationEvaluatedTopicArn`
-
-If provided, the stack creates the SNS-to-SQS subscription automatically.
-If omitted, the queue is still created and can be subscribed manually.
-
 ## Local Development
 
-### 1. Create LocalStack DynamoDB tables
+### Local DynamoDB
 
 ```powershell
 make local-db-start
 ```
 
-This now creates:
+This prepares:
 
 - `RescueRequestTable`
 - `IdempotencyTable`
 - `IncidentCatalogTable`
 
-### 2. Create local SNS topics
+### Local SNS Topics
+
+Only the service-owned topic must be created by this service locally:
 
 ```powershell
 aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-1 --name rescue-request-events-v1
-aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-1 --name rescue-prioritization-commands-v1
+```
+
+If you want to exercise prioritization-result ingest end to end, create the external topics separately:
+
+```powershell
+aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-1 --name rescue-prioritization-created-v1
 aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-1 --name rescue-prioritization-updated-v1
 ```
 
-### 3. Create local Secrets Manager secret
+### Local Secret
 
 ```powershell
 aws secretsmanager create-secret `
@@ -223,31 +320,8 @@ aws secretsmanager create-secret `
   --secret-string "{\"apiUrl\":\"https://incident-service.krittamark.com/api/v1/incidents\",\"apiKey\":\"123\",\"accept\":\"application/json\",\"transactionIdHeader\":\"X-IncidentTNX-Id\"}"
 ```
 
-### 4. Start SAM local
+### SAM Local
 
 ```powershell
 sam local start-api --template-file template.local.yaml --docker-network rescue-net --env-vars .env.json
 ```
-
-## Contract Note About Message #3
-
-The source document is internally inconsistent for Message #3:
-
-- the producer/consumer direction says it is sent from Rescue Request Service to Prioritization Service
-- the example body looks like an already evaluated result
-
-The implementation therefore treats `rescue.prioritization.updated.v1` as a re-evaluation trigger carrying the latest rescue-request snapshot.
-This matches the producer/consumer direction and the described business purpose.
-
-## Verification
-
-The implementation was verified with:
-
-- all unit tests passing
-- integration smoke tests passing for:
-  - create request
-  - citizen status
-  - list by incident
-  - update priority
-  - prioritization ingest
-  - incident list

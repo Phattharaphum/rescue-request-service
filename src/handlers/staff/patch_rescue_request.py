@@ -1,16 +1,17 @@
 from src.application.usecases import patch_rescue_request
-from src.handlers.handler_utils import cors_handler, get_header, get_path_param, handle_error, parse_body
+from src.handlers.handler_utils import cors_handler, get_header, handle_error, parse_body, require_uuid_path_param
 from src.shared.response import ok
+from src.shared.validators import parse_optional_int
 
 
 @cors_handler
 def handler(event, context):
     try:
-        request_id = get_path_param(event, "requestId")
+        request_id = require_uuid_path_param(event, "requestId")
         body = parse_body(event)
         idempotency_key = get_header(event, "X-Idempotency-Key")
         if_match = get_header(event, "If-Match")
-        expected_version = int(if_match) if if_match else None
+        expected_version = parse_optional_int(if_match, "If-Match", minimum=1)
 
         result = patch_rescue_request.execute(
             request_id=request_id,
@@ -18,7 +19,7 @@ def handler(event, context):
             idempotency_key=idempotency_key,
             expected_version=expected_version,
         )
-        return ok(result)
+        return ok(result, event)
     except Exception as e:
         return handle_error(e, event)
 

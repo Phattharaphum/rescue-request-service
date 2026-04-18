@@ -233,7 +233,7 @@ def test_update_current_fields_targets_current_item_and_enforces_expected_versio
 
     repository.update_current_fields(
         request_id="req-123",
-        updates={"priorityScore": 90.5, "latestNote": "Escalated"},
+        updates={"priorityScore": 0.905, "latestNote": "Escalated"},
         expected_version=3,
     )
 

@@ -1,4 +1,5 @@
 from src.adapters.persistence.rescue_request_repository import get_current_state
+from src.application.usecases.current_state_projection import clean_current_state_item
 from src.shared.errors import NotFoundError
 from src.shared.logger import get_logger
 
@@ -10,4 +11,4 @@ def execute(request_id: str) -> dict:
     if not current:
         raise NotFoundError(f"Request {request_id} not found")
 
-    return {k: v for k, v in current.items() if k not in {"PK", "SK", "itemType"}}
+    return clean_current_state_item(current)

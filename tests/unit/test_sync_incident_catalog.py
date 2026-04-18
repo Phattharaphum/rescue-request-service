@@ -4,6 +4,7 @@ from src.application.usecases import sync_incident_catalog as usecase
 def test_assigns_running_incident_names_and_reuses_existing(monkeypatch):
     upserted: list[dict] = []
 
+    monkeypatch.setattr(usecase, "ensure_mock_incidents_seeded", lambda: [])
     monkeypatch.setattr(
         usecase,
         "fetch_incidents",
