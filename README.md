@@ -67,6 +67,8 @@ rescue-request-service/
 |-- infra/
 |-- local/
 |   |-- docker-compose.yml
+|   |-- bootstrap/
+|   |   `-- bootstrap_resources.ps1
 |   `-- dynamodb/
 |       |-- create_tables.sh
 |       |-- create_tables.ps1
@@ -146,7 +148,7 @@ Current `.env.json` example:
 
 ## Local Setup (Core)
 
-### Step 1: Start LocalStack and create DynamoDB tables
+### Step 1: Start LocalStack and bootstrap local AWS resources
 
 ### bash
 
@@ -163,10 +165,34 @@ make local-db-start
 This starts LocalStack with enabled services:
 - `dynamodb`, `sns`, `sqs`, `secretsmanager`, `events`, `cloudwatch`, `logs`
 
-This also prepares tables:
+This also creates/updates DynamoDB tables:
 - `RescueRequestTable`
 - `IdempotencyTable`
 - `IncidentCatalogTable`
+
+This also bootstraps SNS/SQS resources and subscriptions:
+- SNS topics: `rescue-request-events-v1`, `rescue-prioritization-created-v1`, `rescue-prioritization-updated-v1`
+- SQS queues: `rescue-request-events-v1-stream`, `rescue-prioritization-evaluated`, `rescue-prioritization-evaluated-dlq`
+- SNS subscriptions: `rescue-request-events-v1` -> `rescue-request-events-v1-stream`
+- SNS subscriptions: `rescue-prioritization-created-v1` -> `rescue-prioritization-evaluated`
+- SNS subscriptions: `rescue-prioritization-updated-v1` -> `rescue-prioritization-evaluated`
+
+This also bootstraps Secrets Manager:
+- `rescue-request-service/incident-tracking/local` (or value from `INCIDENT_SYNC_SECRET_ID`)
+
+Optional: re-run only messaging + secrets bootstrap without recreating tables:
+
+### bash
+
+```bash
+make local-bootstrap
+```
+
+### PowerShell
+
+```powershell
+make local-bootstrap
+```
 
 ### Step 2: Export AWS credentials for LocalStack
 
@@ -186,27 +212,7 @@ $env:AWS_SECRET_ACCESS_KEY="test"
 $env:AWS_DEFAULT_REGION="ap-southeast-1"
 ```
 
-### Step 3: Create main service topic used by API publish
-
-### bash
-
-```bash
-aws sns create-topic \
-  --endpoint-url http://localhost:4566 \
-  --region ap-southeast-1 \
-  --name rescue-request-events-v1
-```
-
-### PowerShell
-
-```powershell
-aws sns create-topic `
-  --endpoint-url http://localhost:4566 `
-  --region ap-southeast-1 `
-  --name rescue-request-events-v1
-```
-
-### Step 4: Start API with SAM local
+### Step 3: Start API with SAM local
 
 ### bash
 
@@ -223,7 +229,7 @@ sam local start-api --template-file template.local.yaml --docker-network rescue-
 API base URL:
 - `http://127.0.0.1:3000/v1`
 
-### Step 5: Stop local environment
+### Step 4: Stop local environment
 
 ### bash
 
@@ -249,7 +255,10 @@ make local-stop
 | External prioritization created topic | `rescue-prioritization-created-v1` | external |
 | External prioritization updated topic | `rescue-prioritization-updated-v1` | external |
 
-### Create local SNS/SQS resources (recommended)
+### Manual create local SNS/SQS resources (optional)
+
+`make local-db-start` already creates these resources automatically.
+Use this section only when you need to recreate individual resources manually.
 
 ### bash
 
