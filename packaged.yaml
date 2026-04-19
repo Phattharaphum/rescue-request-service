@@ -9,6 +9,23 @@ Parameters:
     - dev
     - prod
     - local
+  PrioritizationCreatedTopicArn:
+    Type: String
+    Default: ''
+  PrioritizationUpdatedTopicArn:
+    Type: String
+    Default: ''
+Conditions:
+  HasPrioritizationCreatedTopicArn:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: PrioritizationCreatedTopicArn
+      - ''
+  HasPrioritizationUpdatedTopicArn:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: PrioritizationUpdatedTopicArn
+      - ''
 Globals:
   Function:
     Runtime: python3.11
@@ -22,10 +39,15 @@ Globals:
           Ref: RescueRequestTable
         IDEMPOTENCY_TABLE_NAME:
           Ref: IdempotencyTable
+        INCIDENT_CATALOG_TABLE_NAME:
+          Ref: IncidentCatalogTable
         SNS_TOPIC_ARN:
           Ref: RescueRequestEventsTopic
         ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: INFO
+        INCIDENT_SYNC_SECRET_ID:
+          Ref: IncidentTrackingApiSecret
+        INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS: '30'
 Resources:
   RescueRequestTable:
     Type: AWS::DynamoDB::Table
@@ -62,6 +84,33 @@ Resources:
         Enabled: true
     Metadata:
       SamResourceId: IdempotencyTable
+  IncidentCatalogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: IncidentCatalogTable-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: incidentId
+        AttributeType: S
+      - AttributeName: catalogPartition
+        AttributeType: S
+      - AttributeName: catalogSortKey
+        AttributeType: S
+      KeySchema:
+      - AttributeName: incidentId
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+      - IndexName: CatalogOrderIndex
+        KeySchema:
+        - AttributeName: catalogPartition
+          KeyType: HASH
+        - AttributeName: catalogSortKey
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+    Metadata:
+      SamResourceId: IncidentCatalogTable
   StreamEventLogTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -90,6 +139,16 @@ Resources:
         Fn::Sub: rescue-request-events-v1-${Stage}
     Metadata:
       SamResourceId: RescueRequestEventsTopic
+  IncidentTrackingApiSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:
+        Fn::Sub: rescue-request-service/incident-tracking/${Stage}
+      Description: Endpoint configuration for syncing incidents from IncidentTracking
+        Service
+      SecretString: '{"apiUrl":"https://incident-service.krittamark.com/api/v1/incidents","apiKey":"REPLACE_ME","accept":"application/json","transactionIdHeader":"X-IncidentTNX-Id"}'
+    Metadata:
+      SamResourceId: IncidentTrackingApiSecret
   RescueRequestEventsStreamQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -131,6 +190,93 @@ Resources:
         - Arn
     Metadata:
       SamResourceId: RescueRequestEventsStreamSubscription
+  RescuePrioritizationEvaluatedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: rescue-prioritization-evaluated-dlq-${Stage}
+    Metadata:
+      SamResourceId: RescuePrioritizationEvaluatedDlq
+  RescuePrioritizationEvaluatedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: rescue-prioritization-evaluated-${Stage}
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - RescuePrioritizationEvaluatedDlq
+          - Arn
+        maxReceiveCount: 3
+    Metadata:
+      SamResourceId: RescuePrioritizationEvaluatedQueue
+  RescuePrioritizationEvaluatedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: RescuePrioritizationEvaluatedQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AllowPrioritizationCreatedTopicPublish
+          Effect: Allow
+          Principal: '*'
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - RescuePrioritizationEvaluatedQueue
+            - Arn
+          Condition:
+            ArnLike:
+              aws:SourceArn:
+                Fn::If:
+                - HasPrioritizationCreatedTopicArn
+                - Ref: PrioritizationCreatedTopicArn
+                - Fn::Sub: arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:rescue-prioritization-created-v1*
+        - Sid: AllowPrioritizationUpdatedTopicPublish
+          Effect: Allow
+          Principal: '*'
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - RescuePrioritizationEvaluatedQueue
+            - Arn
+          Condition:
+            ArnLike:
+              aws:SourceArn:
+                Fn::If:
+                - HasPrioritizationUpdatedTopicArn
+                - Ref: PrioritizationUpdatedTopicArn
+                - Fn::Sub: arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:rescue-prioritization-updated-v1*
+    Metadata:
+      SamResourceId: RescuePrioritizationEvaluatedQueuePolicy
+  RescuePrioritizationCreatedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasPrioritizationCreatedTopicArn
+    Properties:
+      TopicArn:
+        Ref: PrioritizationCreatedTopicArn
+      Protocol: sqs
+      Endpoint:
+        Fn::GetAtt:
+        - RescuePrioritizationEvaluatedQueue
+        - Arn
+    Metadata:
+      SamResourceId: RescuePrioritizationCreatedSubscription
+  RescuePrioritizationUpdatedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasPrioritizationUpdatedTopicArn
+    Properties:
+      TopicArn:
+        Ref: PrioritizationUpdatedTopicArn
+      Protocol: sqs
+      Endpoint:
+        Fn::GetAtt:
+        - RescuePrioritizationEvaluatedQueue
+        - Arn
+    Metadata:
+      SamResourceId: RescuePrioritizationUpdatedSubscription
   RescueRequestApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -147,7 +293,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.create_rescue_request.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -170,11 +316,49 @@ Resources:
             Method: POST
     Metadata:
       SamResourceId: CreateRescueRequestFunction
+  ListIncidentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.list_incidents.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IncidentCatalogTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/incidents
+            Method: GET
+    Metadata:
+      SamResourceId: ListIncidentsFunction
+  InternalListIncidentCatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.list_incident_catalog.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IncidentCatalogTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/internal/incidents/catalog
+            Method: GET
+    Metadata:
+      SamResourceId: InternalListIncidentCatalogFunction
   CitizenTrackingLookupFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.citizen_tracking_lookup.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -193,7 +377,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.get_citizen_status.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -212,7 +396,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.create_citizen_update.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -239,7 +423,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.list_citizen_updates.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -258,7 +442,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.get_rescue_request.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -277,7 +461,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.patch_rescue_request.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -300,11 +484,38 @@ Resources:
             Method: PATCH
     Metadata:
       SamResourceId: PatchRescueRequestFunction
+  UpdateRescueRequestPriorityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.staff.update_rescue_request_priority.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/rescue-requests/{requestId}/priority
+            Method: PATCH
+    Metadata:
+      SamResourceId: UpdateRescueRequestPriorityFunction
   ListStatusEventsFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.list_status_events.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -323,7 +534,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.append_status_event.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -350,7 +561,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.get_current_state.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -369,7 +580,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.list_by_incident.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -388,7 +599,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.get_idempotency_record.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -407,7 +618,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.triage.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -434,7 +645,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.assign.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -461,7 +672,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.start.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -488,7 +699,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.resolve.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -515,7 +726,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.cancel.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/f493088ec36d63607b2317a7485ac3bc
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -538,12 +749,58 @@ Resources:
             Method: POST
     Metadata:
       SamResourceId: CancelFunction
+  IngestPrioritizationEvaluationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.ingest_rescue_request_evaluations.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      Events:
+        PrioritizationEvaluatedQueue:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - RescuePrioritizationEvaluatedQueue
+              - Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
+    Metadata:
+      SamResourceId: IngestPrioritizationEvaluationsFunction
+  SyncIncidentCatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.sync_incidents.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      Timeout: 30
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: IncidentCatalogTable
+      - AWSSecretsManagerGetSecretValuePolicy:
+          SecretArn:
+            Ref: IncidentTrackingApiSecret
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Enabled: true
+    Metadata:
+      SamResourceId: SyncIncidentCatalogFunction
   StreamPollerFunction:
     Type: AWS::Serverless::Function
     Properties:
       Runtime: nodejs20.x
       Handler: src/poller.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/9d32c47fe00f87d28108ee75a7fdde25
+      CodeUri: s3://cs366-01-microservice-game-v01/a2aa734a1c9a5ed0b2977f7e647bfb56
       Timeout: 60
       Environment:
         Variables:
@@ -577,7 +834,7 @@ Resources:
     Properties:
       Runtime: nodejs20.x
       Handler: src/stream.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/9d32c47fe00f87d28108ee75a7fdde25
+      CodeUri: s3://cs366-01-microservice-game-v01/a2aa734a1c9a5ed0b2977f7e647bfb56
       Timeout: 900
       Environment:
         Variables:
@@ -637,6 +894,10 @@ Outputs:
     Description: Idempotency table name
     Value:
       Ref: IdempotencyTable
+  IncidentCatalogTableName:
+    Description: Incident catalog table name
+    Value:
+      Ref: IncidentCatalogTable
   SnsTopicArn:
     Description: SNS topic ARN
     Value:
@@ -645,6 +906,20 @@ Outputs:
     Description: SQS queue URL subscribed to rescue request events topic
     Value:
       Ref: RescueRequestEventsStreamQueue
+  RescuePrioritizationEvaluatedQueueUrl:
+    Description: SQS queue URL for RescueRequestEvaluatedEvent ingestion
+    Value:
+      Ref: RescuePrioritizationEvaluatedQueue
+  RescuePrioritizationEvaluatedQueueArn:
+    Description: SQS queue ARN for RescueRequestEvaluatedEvent ingestion
+    Value:
+      Fn::GetAtt:
+      - RescuePrioritizationEvaluatedQueue
+      - Arn
+  IncidentTrackingApiSecretArn:
+    Description: Secrets Manager ARN for IncidentTracking Service configuration
+    Value:
+      Ref: IncidentTrackingApiSecret
   StreamServiceSseUrl:
     Description: SSE endpoint for the static frontend
     Value:

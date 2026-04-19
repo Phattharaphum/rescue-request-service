@@ -1,4 +1,5 @@
 from src.adapters.persistence.rescue_request_repository import get_current_state, get_master, list_by_incident
+from src.application.usecases.current_state_projection import clean_current_state_item
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -12,7 +13,7 @@ def execute(incident_id: str, limit: int = 20, cursor: str | None = None, status
         request_id = cleaned_projection.get("requestId")
 
         master = _clean_item(get_master(request_id)) if request_id else {}
-        current = _clean_item(get_current_state(request_id)) if request_id else {}
+        current = clean_current_state_item(get_current_state(request_id)) if request_id else {}
         latest_status = current.get("status") or cleaned_projection.get("status")
 
         if status and latest_status != status:

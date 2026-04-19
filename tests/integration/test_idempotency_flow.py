@@ -8,6 +8,7 @@ import pytest
 os.environ["STAGE"] = "local"
 os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:4566"
 os.environ["AWS_REGION"] = "ap-southeast-1"
+os.environ["AWS_DEFAULT_REGION"] = "ap-southeast-1"
 os.environ["DYNAMODB_TABLE_NAME"] = "RescueRequestTable"
 os.environ["IDEMPOTENCY_TABLE_NAME"] = "IdempotencyTable"
 os.environ["SNS_TOPIC_ARN"] = ""
@@ -15,6 +16,11 @@ os.environ["AWS_ACCESS_KEY_ID"] = "test"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
 
 from src.handlers.public.create_rescue_request import handler as create_handler
+from src.handlers.commands.cancel import handler as cancel_handler
+from src.handlers.commands.triage import handler as triage_handler
+from src.handlers.staff.get_current_state import handler as get_current_state_handler
+from src.handlers.staff.get_rescue_request import handler as get_rescue_request_handler
+from src.handlers.staff.patch_rescue_request import handler as patch_handler
 
 
 def _random_phone() -> str:
@@ -74,6 +80,22 @@ class TestIdempotencyFlow:
             "queryStringParameters": None,
         }
 
+    def _create_request(self, description: str = "Idempotency request") -> str:
+        body = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "FLOOD",
+            "description": description,
+            "peopleCount": 2,
+            "latitude": 13.7563,
+            "longitude": 100.5018,
+            "contactName": "Idem User",
+            "contactPhone": _random_phone(),
+            "sourceChannel": "WEB",
+        }
+        response = create_handler(self._build_event(body), None)
+        assert response["statusCode"] == 201
+        return json.loads(response["body"])["requestId"]
+
     def test_idempotent_create_same_key_same_payload(self):
         idem_key = str(uuid.uuid4())
         body = {
@@ -119,3 +141,113 @@ class TestIdempotencyFlow:
 
         response2 = create_handler(self._build_event(body2, idem_key), None)
         assert response2["statusCode"] == 409
+
+    def test_same_key_across_endpoints_is_scoped(self):
+        request_id = self._create_request("Cross endpoint scope check")
+        idem_key = str(uuid.uuid4())
+        command_body = {
+            "changedBy": "staff-001",
+            "changedByRole": "dispatcher",
+            "reason": "duplicate submission",
+        }
+
+        triage_event = {
+            "httpMethod": "POST",
+            "path": f"/v1/rescue-requests/{request_id}/triage",
+            "headers": {"Content-Type": "application/json", "X-Idempotency-Key": idem_key},
+            "body": json.dumps(command_body),
+            "pathParameters": {"requestId": request_id},
+            "queryStringParameters": None,
+        }
+        cancel_event = {
+            "httpMethod": "POST",
+            "path": f"/v1/rescue-requests/{request_id}/cancel",
+            "headers": {"Content-Type": "application/json", "X-Idempotency-Key": idem_key},
+            "body": json.dumps(command_body),
+            "pathParameters": {"requestId": request_id},
+            "queryStringParameters": None,
+        }
+
+        triage_response = triage_handler(triage_event, None)
+        assert triage_response["statusCode"] == 200
+        triage_result = json.loads(triage_response["body"])
+        assert triage_result["newStatus"] == "TRIAGED"
+
+        cancel_response = cancel_handler(cancel_event, None)
+        assert cancel_response["statusCode"] == 200
+        cancel_result = json.loads(cancel_response["body"])
+        assert cancel_result["newStatus"] == "CANCELLED"
+        assert cancel_result["eventId"] != triage_result["eventId"]
+
+        current_event = {
+            "httpMethod": "GET",
+            "path": f"/v1/rescue-requests/{request_id}/current",
+            "headers": {},
+            "body": None,
+            "pathParameters": {"requestId": request_id},
+            "queryStringParameters": None,
+        }
+        current_response = get_current_state_handler(current_event, None)
+        assert current_response["statusCode"] == 200
+        current = json.loads(current_response["body"])
+        assert current["status"] == "CANCELLED"
+
+    def test_same_key_across_resources_is_scoped(self):
+        request_id_1 = self._create_request("Scope test request 1")
+        request_id_2 = self._create_request("Scope test request 2")
+        idem_key = str(uuid.uuid4())
+        patch_body = {"description": "patched with shared idempotency key"}
+
+        patch_event_1 = {
+            "httpMethod": "PATCH",
+            "path": f"/v1/rescue-requests/{request_id_1}",
+            "headers": {"Content-Type": "application/json", "X-Idempotency-Key": idem_key},
+            "body": json.dumps(patch_body),
+            "pathParameters": {"requestId": request_id_1},
+            "queryStringParameters": None,
+        }
+        patch_event_2 = {
+            "httpMethod": "PATCH",
+            "path": f"/v1/rescue-requests/{request_id_2}",
+            "headers": {"Content-Type": "application/json", "X-Idempotency-Key": idem_key},
+            "body": json.dumps(patch_body),
+            "pathParameters": {"requestId": request_id_2},
+            "queryStringParameters": None,
+        }
+
+        patch_response_1 = patch_handler(patch_event_1, None)
+        assert patch_response_1["statusCode"] == 200
+        patch_result_1 = json.loads(patch_response_1["body"])
+        assert patch_result_1["requestId"] == request_id_1
+
+        patch_response_2 = patch_handler(patch_event_2, None)
+        assert patch_response_2["statusCode"] == 200
+        patch_result_2 = json.loads(patch_response_2["body"])
+        assert patch_result_2["requestId"] == request_id_2
+
+        get_event_1 = {
+            "httpMethod": "GET",
+            "path": f"/v1/rescue-requests/{request_id_1}",
+            "headers": {},
+            "body": None,
+            "pathParameters": {"requestId": request_id_1},
+            "queryStringParameters": None,
+        }
+        get_event_2 = {
+            "httpMethod": "GET",
+            "path": f"/v1/rescue-requests/{request_id_2}",
+            "headers": {},
+            "body": None,
+            "pathParameters": {"requestId": request_id_2},
+            "queryStringParameters": None,
+        }
+
+        get_response_1 = get_rescue_request_handler(get_event_1, None)
+        assert get_response_1["statusCode"] == 200
+        get_response_2 = get_rescue_request_handler(get_event_2, None)
+        assert get_response_2["statusCode"] == 200
+
+        result_1 = json.loads(get_response_1["body"])
+        result_2 = json.loads(get_response_2["body"])
+        assert result_1["master"]["description"] == "patched with shared idempotency key"
+        assert result_2["master"]["description"] == "patched with shared idempotency key"

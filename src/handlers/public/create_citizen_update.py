@@ -1,12 +1,12 @@
 from src.application.usecases import create_citizen_update
-from src.handlers.handler_utils import cors_handler, get_header, get_path_param, handle_error, parse_body
+from src.handlers.handler_utils import cors_handler, get_header, handle_error, parse_body, require_uuid_path_param
 from src.shared.response import created
 
 
 @cors_handler
 def handler(event, context):
     try:
-        request_id = get_path_param(event, "requestId")
+        request_id = require_uuid_path_param(event, "requestId")
         body = parse_body(event)
         idempotency_key = get_header(event, "X-Idempotency-Key")
         client_ip = get_header(event, "X-Forwarded-For")
@@ -19,7 +19,7 @@ def handler(event, context):
             client_ip=client_ip,
             user_agent=user_agent,
         )
-        return created(result)
+        return created(result, event)
     except Exception as e:
         return handle_error(e, event)
 

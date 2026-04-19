@@ -23,6 +23,7 @@ def execute(
     idempotency_key: str | None = None,
     expected_version: int | None = None,
 ) -> dict:
+    idempotency_reservation: dict | None = None
     unsupported_fields = sorted(set(body.keys()) - ALLOWED_FIELDS)
     if unsupported_fields:
         raise ValidationError(
@@ -41,13 +42,14 @@ def execute(
         raise ValidationError("Input validation failed", validation_errors)
 
     if idempotency_key:
-        replay = check_and_reserve(
+        idempotency_reservation = check_and_reserve(
             idempotency_key=idempotency_key,
             operation_name="UpdateRescueRequestPriority",
+            resource_scope=f"PATCH:/v1/rescue-requests/{request_id}/priority",
             request_body=body,
         )
-        if replay and replay.get("replay"):
-            return json.loads(replay["body"])
+        if idempotency_reservation and idempotency_reservation.get("replay"):
+            return json.loads(idempotency_reservation["body"])
 
     current = get_current_state(request_id)
     if not current:
@@ -95,7 +97,13 @@ def execute(
         )
     except ClientError as e:
         if idempotency_key:
-            finalize_failure(idempotency_key, "UPDATE_PRIORITY_FAILED", str(e))
+            finalize_failure(
+                idempotency_key=idempotency_key,
+                error_code="UPDATE_PRIORITY_FAILED",
+                error_message=str(e),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "ConditionalCheckFailedException":
             if expected_version is not None:
@@ -107,7 +115,13 @@ def execute(
         raise
     except Exception as e:
         if idempotency_key:
-            finalize_failure(idempotency_key, "UPDATE_PRIORITY_FAILED", str(e))
+            finalize_failure(
+                idempotency_key=idempotency_key,
+                error_code="UPDATE_PRIORITY_FAILED",
+                error_message=str(e),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
         raise
 
     result = {
@@ -124,6 +138,8 @@ def execute(
             idempotency_key=idempotency_key,
             response_status_code=200,
             response_body=json.dumps(result, default=str),
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
         )
 
     if "priorityScore" in body and resolved_priority_score != current.get("priorityScore"):
@@ -153,6 +169,8 @@ def _validate_body(body: dict[str, Any]) -> list[dict[str, str]]:
                 errors.append({"field": "priorityScore", "issue": "must be a number or null"})
             elif not math.isfinite(float(priority_score)):
                 errors.append({"field": "priorityScore", "issue": "must be a finite number"})
+            elif float(priority_score) < 0 or float(priority_score) > 1:
+                errors.append({"field": "priorityScore", "issue": "must be between 0 and 1"})
 
     if "priorityLevel" in body and not _is_nullable_non_empty_text(body.get("priorityLevel")):
         errors.append({"field": "priorityLevel", "issue": "must be a non-empty string or null"})

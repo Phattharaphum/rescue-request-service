@@ -2,7 +2,11 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from src.adapters.persistence.rescue_request_repository import create_rescue_request, find_by_phone_hash
+from src.adapters.persistence.rescue_request_repository import (
+    create_rescue_request,
+    find_by_phone_hash,
+    update_current_fields,
+)
 from src.adapters.utils.hashing import hash_phone, hash_tracking_code
 from src.adapters.utils.phone_normalizer import normalize_phone
 from src.application.services.duplicate_detection_service import detect_duplicate, get_duplicate_signature
@@ -19,12 +23,21 @@ from src.shared.validators import validate_latitude, validate_longitude, validat
 logger = get_logger(__name__)
 
 REQUIRED_FIELDS = [
-    "incidentId", "requestType", "description", "peopleCount",
-    "latitude", "longitude", "contactName", "contactPhone", "sourceChannel",
+    "incidentId",
+    "requestType",
+    "description",
+    "peopleCount",
+    "latitude",
+    "longitude",
+    "contactName",
+    "contactPhone",
+    "sourceChannel",
 ]
 
 
-def execute(body: dict, idempotency_key: str | None = None, client_ip: str | None = None, user_agent: str | None = None) -> dict:
+def execute(
+    body: dict, idempotency_key: str | None = None, client_ip: str | None = None, user_agent: str | None = None
+) -> dict:
     errors = validate_required_fields(body, REQUIRED_FIELDS)
     errors.extend(validate_phone(body.get("contactPhone", "")))
     errors.extend(validate_latitude(body.get("latitude")))
@@ -39,17 +52,19 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
     longitude = float(body["longitude"])
     people_count = int(body["peopleCount"])
 
+    idempotency_reservation: dict | None = None
     if idempotency_key:
-        replay = check_and_reserve(
+        idempotency_reservation = check_and_reserve(
             idempotency_key=idempotency_key,
             operation_name="CreateRescueRequest",
+            resource_scope="POST:/v1/rescue-requests",
             request_body=body,
             client_id=None,
             request_ip=client_ip,
             user_agent=user_agent,
         )
-        if replay and replay.get("replay"):
-            return json.loads(replay["body"])
+        if idempotency_reservation and idempotency_reservation.get("replay"):
+            return json.loads(idempotency_reservation["body"])
 
     normalized_phone = normalize_phone(body["contactPhone"])
     phone_hash = hash_phone(normalized_phone)
@@ -135,6 +150,14 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
         "latestNote": None,
         "lastUpdatedBy": "system",
         "lastUpdatedAt": now,
+        "latestPrioritySourceEventId": None,
+        "latestPrioritySourceEventType": None,
+        "latestPrioritySourceOccurredAt": None,
+        "latestPriorityEvaluationId": None,
+        "latestPriorityReason": None,
+        "latestPriorityEvaluatedAt": None,
+        "latestPriorityCorrelationId": None,
+        "lastPriorityIngestedAt": None,
     }
 
     event_item = {
@@ -208,7 +231,13 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
         )
     except Exception as e:
         if idempotency_key:
-            finalize_failure(idempotency_key, "CREATE_FAILED", str(e))
+            finalize_failure(
+                idempotency_key=idempotency_key,
+                error_code="CREATE_FAILED",
+                error_message=str(e),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
         raise
 
     result = {
@@ -224,10 +253,21 @@ def execute(body: dict, idempotency_key: str | None = None, client_ip: str | Non
             response_status_code=201,
             response_body=json.dumps(result, default=str),
             result_resource_id=request_id,
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
         )
 
     try:
-        publish_request_created(request_id=request_id, request_data=master_item, correlation_id=request_id)
+        header = publish_request_created(request_id=request_id, request_data=master_item, correlation_id=request_id)
+        if header:
+            update_current_fields(
+                request_id=request_id,
+                updates={
+                    "latestPrioritySourceEventId": header["messageId"],
+                    "latestPrioritySourceEventType": header["eventType"],
+                    "latestPrioritySourceOccurredAt": header["occurredAt"],
+                },
+            )
     except Exception:
         logger.exception("Failed to publish request created event")
 

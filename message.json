@@ -1,0 +1,30 @@
+{
+  "header": {
+    "messageType": "RescueRequestEvaluatedEvent",
+    "messageId": "7f91fc06-2f67-4630-a2af-585c7728d48f",
+    "correlationId": "9ba311dd-a925-4631-a75e-a820c0a17a44",
+    "sentAt": "2026-04-18T02:30:00Z",
+    "version": "1"
+  },
+  "body": {
+    "requestId": "e6c084a3-1517-4814-abef-6e5161ec220f",
+    "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
+    "evaluateId": "11111111-2222-3333-4444-555555555556",
+    "requestType": "FLOOD",
+    "priorityScore": 0.92,
+    "priorityLevel": "CRITICAL",
+    "evaluateReason": "Children and elderly residents require urgent rescue.",
+    "submittedAt": "2026-04-18T02:00:00Z",
+    "lastEvaluatedAt": "2026-04-18T02:30:00Z",
+    "description": "Water level is rising quickly and evacuation is needed.",
+    "location": {
+      "latitude": 13.7563,
+      "longitude": 100.5018
+    },
+    "peopleCount": 4,
+    "specialNeeds": [
+      "children",
+      "elderly"
+    ]
+  }
+}

@@ -1,4 +1,3 @@
-import json
 from decimal import Decimal
 from typing import Any
 
@@ -37,6 +36,115 @@ def reserve_idempotency_key(record: dict) -> bool:
         return False
 
 
+def reclaim_expired_in_progress_idempotency_key(
+    *,
+    key_hash: str,
+    request_fingerprint: str,
+    operation_name: str,
+    resource_scope: str,
+    expected_lock_expires_at: str,
+    now_iso: str,
+    lock_owner: str,
+    locked_at: str,
+    lock_expires_at: str,
+    updated_at: str,
+    expires_at: int,
+) -> bool:
+    table = _get_table()
+    expr_names = {"#status": "status"}
+    expr_values: dict[str, Any] = {
+        ":in_progress": "IN_PROGRESS",
+        ":request_fingerprint": request_fingerprint,
+        ":operation_name": operation_name,
+        ":resource_scope": resource_scope,
+        ":expected_lock_expires_at": expected_lock_expires_at,
+        ":now_iso": now_iso,
+        ":lock_owner": lock_owner,
+        ":locked_at": locked_at,
+        ":lock_expires_at": lock_expires_at,
+        ":updated_at": updated_at,
+        ":expires_at": expires_at,
+    }
+    try:
+        table.update_item(
+            Key={"idempotencyKeyHash": key_hash},
+            ConditionExpression=(
+                "#status = :in_progress "
+                "AND requestFingerprint = :request_fingerprint "
+                "AND operationName = :operation_name "
+                "AND resourceScope = :resource_scope "
+                "AND lockExpiresAt = :expected_lock_expires_at "
+                "AND lockExpiresAt <= :now_iso"
+            ),
+            UpdateExpression=(
+                "SET #status = :in_progress, "
+                "lockOwner = :lock_owner, "
+                "lockedAt = :locked_at, "
+                "lockExpiresAt = :lock_expires_at, "
+                "updatedAt = :updated_at, "
+                "expiresAt = :expires_at "
+                "REMOVE errorCode, errorMessage"
+            ),
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+        return True
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return False
+
+
+def retry_failed_idempotency_key(
+    *,
+    key_hash: str,
+    request_fingerprint: str,
+    operation_name: str,
+    resource_scope: str,
+    lock_owner: str,
+    locked_at: str,
+    lock_expires_at: str,
+    updated_at: str,
+    expires_at: int,
+) -> bool:
+    table = _get_table()
+    expr_names = {"#status": "status"}
+    expr_values: dict[str, Any] = {
+        ":failed": "FAILED",
+        ":in_progress": "IN_PROGRESS",
+        ":request_fingerprint": request_fingerprint,
+        ":operation_name": operation_name,
+        ":resource_scope": resource_scope,
+        ":lock_owner": lock_owner,
+        ":locked_at": locked_at,
+        ":lock_expires_at": lock_expires_at,
+        ":updated_at": updated_at,
+        ":expires_at": expires_at,
+    }
+    try:
+        table.update_item(
+            Key={"idempotencyKeyHash": key_hash},
+            ConditionExpression=(
+                "#status = :failed "
+                "AND requestFingerprint = :request_fingerprint "
+                "AND operationName = :operation_name "
+                "AND resourceScope = :resource_scope"
+            ),
+            UpdateExpression=(
+                "SET #status = :in_progress, "
+                "lockOwner = :lock_owner, "
+                "lockedAt = :locked_at, "
+                "lockExpiresAt = :lock_expires_at, "
+                "updatedAt = :updated_at, "
+                "expiresAt = :expires_at "
+                "REMOVE errorCode, errorMessage"
+            ),
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+        return True
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return False
+
+
 def get_idempotency_record(key_hash: str) -> dict | None:
     table = _get_table()
     resp = table.get_item(Key={"idempotencyKeyHash": key_hash})
@@ -53,7 +161,8 @@ def finalize_idempotency_key(
     error_code: str | None = None,
     error_message: str | None = None,
     updated_at: str = "",
-) -> None:
+    expected_lock_owner: str | None = None,
+) -> bool:
     table = _get_table()
     update_parts = ["#status = :status", "updatedAt = :updated_at"]
     expr_values: dict[str, Any] = {":status": status, ":updated_at": updated_at}
@@ -75,9 +184,19 @@ def finalize_idempotency_key(
         update_parts.append("errorMessage = :em")
         expr_values[":em"] = error_message
 
-    table.update_item(
-        Key={"idempotencyKeyHash": key_hash},
-        UpdateExpression="SET " + ", ".join(update_parts),
-        ExpressionAttributeValues=expr_values,
-        ExpressionAttributeNames=expr_names,
-    )
+    kwargs: dict[str, Any] = {
+        "Key": {"idempotencyKeyHash": key_hash},
+        "UpdateExpression": "SET " + ", ".join(update_parts),
+        "ExpressionAttributeValues": expr_values,
+        "ExpressionAttributeNames": expr_names,
+    }
+    if expected_lock_owner:
+        kwargs["ConditionExpression"] = "#status = :in_progress AND lockOwner = :expected_lock_owner"
+        kwargs["ExpressionAttributeValues"][":in_progress"] = "IN_PROGRESS"
+        kwargs["ExpressionAttributeValues"][":expected_lock_owner"] = expected_lock_owner
+
+    try:
+        table.update_item(**kwargs)
+        return True
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return False

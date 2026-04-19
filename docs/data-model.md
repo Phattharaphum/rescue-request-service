@@ -2,11 +2,12 @@
 
 ## Overview
 
-The service currently uses 3 DynamoDB tables:
+The service currently uses 4 DynamoDB tables:
 
 1. `RescueRequestTable-{stage}` for the main rescue-request domain model
 2. `IdempotencyTable-{stage}` for idempotent write coordination and replay
-3. `RescueRequestStreamEventLog-{stage}` for the internal stream relay only
+3. `IncidentCatalogTable-{stage}` for the locally cached incident selection catalog
+4. `RescueRequestStreamEventLog-{stage}` for the internal stream relay only
 
 `RescueRequestStreamEventLog-{stage}` and the `/stream` Lambda are internal implementation
 details for the first-party frontend. Systems that need subscription or pub/sub delivery
@@ -93,6 +94,22 @@ Single-table design with composite primary key:
 - `latestNote`
 - `lastUpdatedBy`
 - `lastUpdatedAt`
+- `latestPrioritySourceEventId`
+- `latestPrioritySourceEventType`
+- `latestPrioritySourceOccurredAt`
+- `latestPriorityEvaluationId`
+- `latestPriorityReason`
+- `latestPriorityEvaluatedAt`
+- `latestPriorityCorrelationId`
+- `lastPriorityIngestedAt`
+
+Notes:
+
+- `latestPrioritySourceEventId`, `latestPrioritySourceEventType`, and `latestPrioritySourceOccurredAt`
+  are internal correlation-tracking fields used to validate inbound prioritization results against
+  the latest service-owned source event published on `rescue-request-events-v1-{stage}`.
+- These source-event tracking fields are stored in DynamoDB but are intentionally filtered out of
+  public/staff REST responses.
 
 #### `STATUS_EVENT`
 
@@ -208,7 +225,42 @@ Purpose:
 - In-progress locks use `lockExpiresAt` and currently reserve a 5-minute processing window.
 - Response replay uses the stored `responseStatusCode` and `responseBody`.
 
-## 3. RescueRequestStreamEventLog
+## 3. IncidentCatalogTable
+
+This table is populated by the scheduled incident-sync Lambda and is the primary source
+used by the application when listing incidents for user selection.
+
+Primary key:
+
+- Partition key: `incidentId` (String)
+
+Global secondary index:
+
+- `CatalogOrderIndex`
+- Partition key: `catalogPartition` (String)
+- Sort key: `catalogSortKey` (String)
+
+### Fields
+
+- `incidentId`
+- `incidentType`
+- `incidentName`
+- `incidentSequence`
+- `status`
+- `incidentDescription`
+- `remoteCreatedAt`
+- `remoteUpdatedAt`
+- `lastSyncedAt`
+- `catalogPartition`
+- `catalogSortKey`
+
+### Notes
+
+- `incidentName` is generated locally as a stable running sequence such as `IncidentA`, `IncidentB`, `IncidentAA`.
+- `CatalogOrderIndex` is used to serve `GET /v1/incidents` in a predictable order.
+- The sync job runs every 30 minutes via EventBridge and uses a 30-second timeout.
+
+## 4. RescueRequestStreamEventLog
 
 This table backs the internal SSE relay only.
 

@@ -98,6 +98,27 @@ class TestCreateRequestFlow:
         response = create_handler(self._build_event(body), None)
         assert response["statusCode"] == 422
 
+    def test_create_request_invalid_json_returns_standard_bad_request(self):
+        event = {
+            "httpMethod": "POST",
+            "path": "/v1/rescue-requests",
+            "headers": {"Content-Type": "application/json"},
+            "body": "{invalid-json",
+            "pathParameters": None,
+            "queryStringParameters": None,
+            "requestContext": {"requestId": "req-invalid-json"},
+        }
+
+        response = create_handler(event, None)
+
+        assert response["statusCode"] == 400
+        result = json.loads(response["body"])
+        assert result["errorCode"] == "BAD_REQUEST"
+        assert result["message"] == "Request body must be valid JSON"
+        assert result["path"] == "/v1/rescue-requests"
+        assert result["requestId"] == "req-invalid-json"
+        assert response["headers"]["X-Trace-Id"] == result["traceId"]
+
     def test_create_and_get_request(self):
         body = {
             "incidentId": f"incident-{uuid.uuid4()}",

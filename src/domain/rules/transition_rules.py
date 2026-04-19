@@ -2,7 +2,7 @@ from src.domain.enums.request_status import RequestStatus
 from src.shared.errors import ConflictError, ValidationError
 
 ALLOWED_TRANSITIONS: dict[RequestStatus, set[RequestStatus]] = {
-    RequestStatus.SUBMITTED: {RequestStatus.TRIAGED, RequestStatus.CANCELLED},
+    RequestStatus.SUBMITTED: {RequestStatus.TRIAGED, RequestStatus.ASSIGNED, RequestStatus.CANCELLED},
     RequestStatus.TRIAGED: {RequestStatus.ASSIGNED, RequestStatus.CANCELLED},
     RequestStatus.ASSIGNED: {RequestStatus.IN_PROGRESS, RequestStatus.CANCELLED},
     RequestStatus.IN_PROGRESS: {RequestStatus.RESOLVED, RequestStatus.CANCELLED},

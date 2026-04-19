@@ -2,6 +2,18 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Rescue Request Service - Local Development
 
+Parameters:
+  PrioritizationCreatedTopicArn:
+    Type: String
+    Default: ""
+  PrioritizationUpdatedTopicArn:
+    Type: String
+    Default: ""
+
+Conditions:
+  HasPrioritizationCreatedTopicArn: !Not [!Equals [!Ref PrioritizationCreatedTopicArn, ""]]
+  HasPrioritizationUpdatedTopicArn: !Not [!Equals [!Ref PrioritizationUpdatedTopicArn, ""]]
+
 Globals:
   Api:
     Cors:
@@ -19,10 +31,13 @@ Globals:
         APP_AWS_REGION: ap-southeast-1
         DYNAMODB_TABLE_NAME: RescueRequestTable
         IDEMPOTENCY_TABLE_NAME: IdempotencyTable
+        INCIDENT_CATALOG_TABLE_NAME: IncidentCatalogTable
         SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
         ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: DEBUG
         DYNAMODB_ENDPOINT: http://localstack:4566
+        INCIDENT_SYNC_SECRET_ID: rescue-request-service/incident-tracking/local
+        INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS: "30"
 
 Resources:
   RescueRequestEventsTopic:
@@ -59,6 +74,64 @@ Resources:
       Protocol: sqs
       Endpoint: !GetAtt RescueRequestEventsStreamQueue.Arn
 
+  RescuePrioritizationEvaluatedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: rescue-prioritization-evaluated-dlq
+
+  RescuePrioritizationEvaluatedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: rescue-prioritization-evaluated
+      VisibilityTimeout: 60
+
+  RescuePrioritizationEvaluatedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref RescuePrioritizationEvaluatedQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPrioritizationCreatedTopicPublish
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !If
+                  - HasPrioritizationCreatedTopicArn
+                  - !Ref PrioritizationCreatedTopicArn
+                  - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:rescue-prioritization-created-v1*"
+          - Sid: AllowPrioritizationUpdatedTopicPublish
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !If
+                  - HasPrioritizationUpdatedTopicArn
+                  - !Ref PrioritizationUpdatedTopicArn
+                  - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:rescue-prioritization-updated-v1*"
+
+  RescuePrioritizationCreatedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasPrioritizationCreatedTopicArn
+    Properties:
+      TopicArn: !Ref PrioritizationCreatedTopicArn
+      Protocol: sqs
+      Endpoint: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+
+  RescuePrioritizationUpdatedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasPrioritizationUpdatedTopicArn
+    Properties:
+      TopicArn: !Ref PrioritizationUpdatedTopicArn
+      Protocol: sqs
+      Endpoint: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+
   CreateRescueRequestFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -70,6 +143,30 @@ Resources:
           Properties:
             Path: /v1/rescue-requests
             Method: POST
+
+  ListIncidentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.list_incidents.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/incidents
+            Method: GET
+
+  InternalListIncidentCatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.list_incident_catalog.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/internal/incidents/catalog
+            Method: GET
 
   CitizenTrackingLookupFunction:
     Type: AWS::Serverless::Function
@@ -275,8 +372,32 @@ Resources:
             Path: /v1/rescue-requests/{requestId}/cancel
             Method: POST
 
+  IngestPrioritizationEvaluationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.ingest_rescue_request_evaluations.handler
+      CodeUri: .
+      Events:
+        PrioritizationEvaluatedQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  SyncIncidentCatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.sync_incidents.handler
+      CodeUri: .
+      Timeout: 30
+
 Outputs:
   SQSQueueUrl:
     Description: Local SQS queue URL subscribed to rescue request events topic
     Value: !Ref RescueRequestEventsStreamQueue
+  RescuePrioritizationEvaluatedQueueUrl:
+    Description: Local SQS queue URL for RescueRequestEvaluatedEvent ingestion
+    Value: !Ref RescuePrioritizationEvaluatedQueue
 

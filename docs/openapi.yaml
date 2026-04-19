@@ -17,13 +17,15 @@ info:
     | Public | `/v1` | Citizens (no authentication required) |
     | Staff | `/v1` | Emergency-response staff |
     | Commands | `/v1` | Staff - state-machine transitions |
+    | Internal | `/v1/internal` | Internal operations and support tooling |
 
     ## State Machine
 
     ```
     SUBMITTED -> TRIAGED -> ASSIGNED -> IN_PROGRESS -> RESOLVED
-        |           |          |            |
-        +-----------+----------+------------+--> CANCELLED
+        |      \        |          |            |
+        |       \-> ASSIGNED       |            |
+        +--------------------------+------------+--> CANCELLED
     ```
 
     * **Terminal states**: `RESOLVED`, `CANCELLED` - no further transitions are allowed.
@@ -58,7 +60,12 @@ info:
     ```json
     {
       "message": "Human-readable description",
+      "errorCode": "BAD_REQUEST",
       "traceId": "uuid",
+      "requestId": "api-gateway-request-id",
+      "timestamp": "2026-04-17T10:30:00+00:00",
+      "path": "/v1/rescue-requests",
+      "method": "POST",
       "details": [
         { "field": "fieldName", "issue": "what is wrong" }
       ]
@@ -73,6 +80,14 @@ info:
 
     REST API preflight is handled by API Gateway, while application responses include
     `Access-Control-Allow-Origin` and `Vary: Origin`.
+
+    ## Incident Catalog
+
+    `GET /v1/incidents` serves the locally stored incident catalog used by clients when
+    selecting an incident. The catalog is refreshed asynchronously from IncidentTracking
+    Service every 30 minutes, so the REST API reads from the database snapshot instead of
+    calling the external service inline. The table is also bootstrapped with five hardmock
+    incidents (`IncidentA` through `IncidentE`) for internal testing and UI initialization.
 
     ## Internal Stream Relay
 
@@ -91,6 +106,11 @@ info:
     Event types include `rescue-request.created`, `rescue-request.status-changed`,
     `rescue-request.citizen-updated`, `rescue-request.priority-score-updated`,
     `rescue-request.resolved`, and `rescue-request.cancelled`.
+
+    Prioritization results are ingested asynchronously from external topics
+    `rescue.prioritization.created.v1` and `rescue.prioritization.updated.v1`
+    through a shared SQS queue. Successful ingests are reflected on the
+    `currentState` prioritization metadata fields documented below.
   version: "1.0.0"
   contact:
     name: Rescue Request Service
@@ -116,12 +136,96 @@ tags:
     description: Staff-facing endpoints for managing rescue requests
   - name: Commands
     description: State-machine command endpoints that advance a request's lifecycle
+  - name: Internal
+    description: Internal-only endpoints for support tooling and operational access
 
 paths:
 
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   #  PUBLIC ENDPOINTS
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /incidents:
+    get:
+      tags: [Public]
+      operationId: listIncidents
+      summary: List incidents from the local incident catalog
+      description: |
+        Returns a paginated list of incidents that citizens can choose from when
+        creating a rescue request.
+
+        This endpoint reads from the service-owned incident catalog table, which is
+        refreshed asynchronously from IncidentTracking Service every 30 minutes.
+        It does not call the external incident API inline.
+
+        The catalog table is bootstrapped with five hardmock incidents (`IncidentA`
+        through `IncidentE`) and may also contain synced upstream incidents.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          description: Filter by the incident status stored in the local catalog snapshot
+          schema:
+            type: string
+          example: "REPORTED"
+      responses:
+        '200':
+          description: Paginated list of incidents from the local catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListIncidentsResponse'
+              example:
+                items:
+                  - incidentId: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
+                    incidentType: "fire"
+                    incidentName: "IncidentA"
+                    incidentSequence: 1
+                    status: "REPORTED"
+                    incidentDescription: "Fire reported near TU Dome (Verified)"
+                    remoteCreatedAt: "2026-02-22T00:00:00Z"
+                    remoteUpdatedAt: "2026-02-22T00:01:04Z"
+                    lastSyncedAt: "2026-04-17T08:30:00+00:00"
+                nextCursor: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/incidents/catalog:
+    get:
+      tags: [Internal]
+      operationId: listInternalIncidentCatalog
+      summary: List every incident catalog row for internal use
+      description: |
+        Returns every item currently stored in `IncidentCatalogTable`, mapped into a
+        narrow internal response shape.
+
+        This endpoint includes the five hardmock seed rows as well as any incidents
+        synced from IncidentTracking Service.
+      responses:
+        '200':
+          description: Full internal incident catalog snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalIncidentCatalogListResponse'
+              example:
+                items:
+                  - incident_id: "MOCK-INC-001"
+                    incident_type: "flood"
+                    incident_name: "IncidentA"
+                    status: "REPORTED"
+                    incident_description: "Mock flood incident for internal testing and UI bootstrap"
+                  - incident_id: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
+                    incident_type: "fire"
+                    incident_name: "IncidentF"
+                    status: "REPORTED"
+                    incident_description: "Fire reported near TU Dome (Verified)"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /rescue-requests:
     post:
@@ -180,6 +284,8 @@ paths:
                 trackingCode: "123456"
                 status: "SUBMITTED"
                 submittedAt: "2024-01-15T10:30:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -216,6 +322,8 @@ paths:
               example:
                 requestId: "550e8400-e29b-41d4-a716-446655440000"
                 incidentId: "INC-2024-001"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
@@ -278,7 +386,7 @@ paths:
                   changeReason: null
                   meta:
                     dispatchChannel: "RADIO"
-                  priorityScore: 85.5
+                  priorityScore: 0.855
                   responderUnitId: "UNIT-007"
                 recentEvents:
                   - eventId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
@@ -289,7 +397,7 @@ paths:
                     changeReason: null
                     meta:
                       dispatchChannel: "RADIO"
-                    priorityScore: 85.5
+                    priorityScore: 0.855
                     responderUnitId: "UNIT-007"
                   - eventId: "b7de6a65-4e4a-46d9-a7f7-540f080f1dd7"
                     version: 2
@@ -298,8 +406,10 @@ paths:
                     occurredAt: "2024-01-15T10:40:00.000000+00:00"
                     changeReason: "Initial triage"
                     meta: null
-                    priorityScore: 75.0
+                    priorityScore: 0.75
                     responderUnitId: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -348,6 +458,8 @@ paths:
                 requestId: "550e8400-e29b-41d4-a716-446655440000"
                 updateType: "PEOPLE_COUNT"
                 createdAt: "2024-01-15T10:45:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '403':
@@ -427,6 +539,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetRescueRequestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -482,6 +596,8 @@ paths:
               example:
                 requestId: "550e8400-e29b-41d4-a716-446655440000"
                 updated: ["description", "peopleCount"]
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -527,6 +643,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListStatusEventsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -567,6 +685,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusTransitionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -606,7 +726,7 @@ paths:
             schema:
               $ref: '#/components/schemas/UpdateRescueRequestPriorityBody'
             example:
-              priorityScore: 92.5
+              priorityScore: 0.925
               priorityLevel: "CRITICAL"
               note: "Escalated after reassessment"
       responses:
@@ -618,11 +738,13 @@ paths:
                 $ref: '#/components/schemas/UpdateRescueRequestPriorityResponse'
               example:
                 requestId: "550e8400-e29b-41d4-a716-446655440000"
-                priorityScore: 92.5
+                priorityScore: 0.925
                 priorityLevel: "CRITICAL"
                 note: "Escalated after reassessment"
                 updatedAt: "2024-01-15T11:05:00.000000+00:00"
                 updated: ["priorityScore", "priorityLevel", "note"]
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -655,13 +777,20 @@ paths:
                 lastEventId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                 stateVersion: 3
                 status: "ASSIGNED"
-                priorityScore: 85.5
+                priorityScore: 0.855
                 priorityLevel: "HIGH"
                 assignedUnitId: "UNIT-007"
                 assignedAt: "2024-01-15T11:00:00.000000+00:00"
                 latestNote: "Team dispatched, ETA 15 minutes"
                 lastUpdatedBy: "staff-001"
                 lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+                latestPriorityEvaluationId: "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f"
+                latestPriorityReason: "Children and bedridden residents need urgent rescue."
+                latestPriorityEvaluatedAt: "2026-04-17T00:04:30+00:00"
+                latestPriorityCorrelationId: "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c"
+                lastPriorityIngestedAt: "2026-04-17T00:05:00+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -728,14 +857,21 @@ paths:
                       lastEventId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                       stateVersion: 3
                       status: "ASSIGNED"
-                      priorityScore: 85.5
+                      priorityScore: 0.855
                       priorityLevel: "HIGH"
                       assignedUnitId: "UNIT-007"
                       assignedAt: "2024-01-15T11:00:00.000000+00:00"
                       latestNote: "Team dispatched, ETA 15 minutes"
                       lastUpdatedBy: "dispatcher-01"
                       lastUpdatedAt: "2024-01-15T11:00:00.000000+00:00"
+                      latestPriorityEvaluationId: "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f"
+                      latestPriorityReason: "Children and bedridden residents need urgent rescue."
+                      latestPriorityEvaluatedAt: "2026-04-17T00:04:30+00:00"
+                      latestPriorityCorrelationId: "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c"
+                      lastPriorityIngestedAt: "2026-04-17T00:05:00+00:00"
                 nextCursor: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -816,7 +952,7 @@ paths:
             example:
               changedBy: "dispatcher-01"
               changedByRole: "dispatcher"
-              priorityScore: 75.0
+              priorityScore: 0.75
               priorityLevel: "HIGH"
               note: "Verified - forwarding to field team Alpha"
       responses:
@@ -833,6 +969,8 @@ paths:
                 newStatus: "TRIAGED"
                 version: 2
                 occurredAt: "2024-01-15T10:35:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -844,9 +982,9 @@ paths:
     post:
       tags: [Commands]
       operationId: assignRescueRequest
-      summary: Assign a responder unit (TRIAGED -> ASSIGNED)
+      summary: Assign a responder unit (SUBMITTED/TRIAGED -> ASSIGNED)
       description: |
-        Advances a rescue request from `TRIAGED` to `ASSIGNED` and records
+        Advances a rescue request from `SUBMITTED` or `TRIAGED` to `ASSIGNED` and records
         the responding unit.
 
         **`responderUnitId` is required** in the request body.
@@ -889,6 +1027,8 @@ paths:
                 newStatus: "ASSIGNED"
                 version: 3
                 occurredAt: "2024-01-15T10:40:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -936,6 +1076,8 @@ paths:
                 newStatus: "IN_PROGRESS"
                 version: 4
                 occurredAt: "2024-01-15T11:15:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -985,6 +1127,8 @@ paths:
                 newStatus: "RESOLVED"
                 version: 5
                 occurredAt: "2024-01-15T12:00:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1044,6 +1188,8 @@ paths:
                 newStatus: "CANCELLED"
                 version: 3
                 occurredAt: "2024-01-15T10:50:00.000000+00:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1196,6 +1342,23 @@ components:
         - FAILED
       example: COMPLETED
 
+    FlexibleSpecialNeeds:
+      nullable: true
+      oneOf:
+        - type: string
+          minLength: 1
+        - type: array
+          items:
+            type: string
+          minItems: 1
+      description: |
+        Special-needs value as currently persisted by the service. Creation and staff PATCH
+        flows do not enforce a strict shape, so existing records may contain either a single
+        string, an array of strings, or `null`.
+      example:
+        - bedridden
+        - children
+
     # â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     CreateRescueRequestBody:
@@ -1251,10 +1414,7 @@ components:
         sourceChannel:
           $ref: '#/components/schemas/SourceChannel'
         specialNeeds:
-          type: string
-          nullable: true
-          description: Any special requirements (e.g. medical equipment, wheelchair)
-          example: "Elderly person, needs wheelchair"
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         locationDetails:
           type: string
           nullable: true
@@ -1345,10 +1505,7 @@ components:
           description: Revised head count
           example: 7
         specialNeeds:
-          type: string
-          nullable: true
-          description: Updated special requirements
-          example: "One person has a broken leg"
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         locationDetails:
           type: string
           nullable: true
@@ -1370,8 +1527,8 @@ components:
           type: number
           format: double
           nullable: true
-          description: New numerical priority score
-          example: 92.5
+          description: New numerical priority score between 0 and 1
+          example: 0.925
         priorityLevel:
           type: string
           nullable: true
@@ -1414,8 +1571,8 @@ components:
           type: number
           format: double
           nullable: true
-          description: Numerical priority score (higher = more urgent)
-          example: 85.5
+          description: Numerical priority score between 0 and 1 (higher = more urgent)
+          example: 0.855
         priorityLevel:
           type: string
           nullable: true
@@ -1450,8 +1607,8 @@ components:
           type: number
           format: double
           nullable: true
-          description: Numerical priority score (higher = more urgent)
-          example: 75.0
+          description: Numerical priority score between 0 and 1 (higher = more urgent)
+          example: 0.75
         priorityLevel:
           type: string
           nullable: true
@@ -1526,8 +1683,7 @@ components:
           type: integer
           nullable: true
         specialNeeds:
-          type: string
-          nullable: true
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         submittedAt:
           type: string
           format: date-time
@@ -1680,6 +1836,100 @@ components:
           type: string
           format: date-time
 
+    ListIncidentsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentCatalogItem'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass as `cursor` for the next page; `null` when no more pages
+
+    IncidentCatalogItem:
+      type: object
+      properties:
+        incidentId:
+          type: string
+          description: Incident identifier from IncidentTracking Service
+          example: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
+        incidentType:
+          type: string
+          nullable: true
+          description: Incident category from the upstream incident service
+          example: "fire"
+        incidentName:
+          type: string
+          description: Stable locally assigned display name (`IncidentA`, `IncidentB`, ...)
+          example: "IncidentA"
+        incidentSequence:
+          type: integer
+          description: Monotonic sequence used to derive `incidentName`
+          example: 1
+        status:
+          type: string
+          nullable: true
+          description: Latest incident status captured in the local catalog snapshot
+          example: "REPORTED"
+        incidentDescription:
+          type: string
+          nullable: true
+          description: Incident description captured from the upstream incident service
+          example: "Fire reported near TU Dome (Verified)"
+        remoteCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Upstream `created_at` timestamp, when available
+        remoteUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Upstream `updated_at` timestamp, when available
+        lastSyncedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when this local catalog entry was last refreshed
+
+    InternalIncidentCatalogListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalIncidentCatalogItem'
+
+    InternalIncidentCatalogItem:
+      type: object
+      properties:
+        incident_id:
+          type: string
+          description: Incident identifier stored in `IncidentCatalogTable`
+          example: "MOCK-INC-001"
+        incident_type:
+          type: string
+          nullable: true
+          description: Incident type stored in `IncidentCatalogTable`
+          example: "flood"
+        incident_name:
+          type: string
+          nullable: true
+          description: Display name stored in `IncidentCatalogTable`
+          example: "IncidentA"
+        status:
+          type: string
+          nullable: true
+          description: Incident status stored in `IncidentCatalogTable`
+          example: "REPORTED"
+        incident_description:
+          type: string
+          nullable: true
+          description: Incident description stored in `IncidentCatalogTable`
+          example: "Mock flood incident for internal testing and UI bootstrap"
+
     GetRescueRequestResponse:
       type: object
       properties:
@@ -1719,8 +1969,7 @@ components:
         peopleCount:
           type: integer
         specialNeeds:
-          type: string
-          nullable: true
+          $ref: '#/components/schemas/FlexibleSpecialNeeds'
         latitude:
           type: number
           format: double
@@ -1906,6 +2155,29 @@ components:
           type: string
           format: date-time
           nullable: true
+        latestPriorityEvaluationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Evaluation ID from the latest ingested prioritization result
+        latestPriorityReason:
+          type: string
+          nullable: true
+          description: Explanation returned by the latest ingested prioritization result
+        latestPriorityEvaluatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when the latest prioritization result was evaluated upstream
+        latestPriorityCorrelationId:
+          type: string
+          nullable: true
+          description: Correlation ID from the latest ingested prioritization result, expected to match the latest service-owned source event messageId
+        lastPriorityIngestedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when the latest prioritization result was successfully ingested
 
     ListByIncidentResponse:
       type: object
@@ -1971,14 +2243,38 @@ components:
           type: string
           description: Human-readable error description
           example: "Input validation failed"
+        errorCode:
+          type: string
+          description: Stable machine-readable error code
+          example: "VALIDATION_ERROR"
         traceId:
           type: string
           format: uuid
           description: Unique trace identifier for debugging
           example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        requestId:
+          type: string
+          nullable: true
+          description: API Gateway request identifier when available
+          example: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC timestamp when the error response was created
+          example: "2026-04-17T10:30:00+00:00"
+        path:
+          type: string
+          nullable: true
+          description: Request path associated with the error
+          example: "/v1/rescue-requests"
+        method:
+          type: string
+          nullable: true
+          description: HTTP method associated with the error
+          example: "POST"
         details:
           type: array
-          description: Field-level validation details (may be empty)
+          description: Field-level validation details (always present, may be empty)
           items:
             type: object
             properties:
@@ -2003,7 +2299,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             message: "since must be a valid ISO-8601 datetime"
+            errorCode: "BAD_REQUEST"
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            requestId: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+            timestamp: "2026-04-17T10:30:00+00:00"
+            path: "/v1/citizen/rescue-requests/550e8400-e29b-41d4-a716-446655440000/updates"
+            method: "GET"
             details: []
 
     NotFound:
@@ -2014,7 +2315,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             message: "Request 550e8400-e29b-41d4-a716-446655440000 not found"
+            errorCode: "NOT_FOUND"
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            requestId: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+            timestamp: "2026-04-17T10:30:00+00:00"
+            path: "/v1/rescue-requests/550e8400-e29b-41d4-a716-446655440000"
+            method: "GET"
             details: []
 
     Conflict:
@@ -2033,7 +2339,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             message: "Invalid transition from SUBMITTED to IN_PROGRESS"
+            errorCode: "CONFLICT"
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            requestId: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+            timestamp: "2026-04-17T10:30:00+00:00"
+            path: "/v1/rescue-requests/550e8400-e29b-41d4-a716-446655440000/start"
+            method: "POST"
             details: []
 
     UnprocessableEntity:
@@ -2044,7 +2355,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             message: "Input validation failed"
+            errorCode: "VALIDATION_ERROR"
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            requestId: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+            timestamp: "2026-04-17T10:30:00+00:00"
+            path: "/v1/rescue-requests"
+            method: "POST"
             details:
               - field: "contactPhone"
                 issue: "invalid phone number format"
@@ -2059,7 +2375,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             message: "Invalid phone number or tracking code"
+            errorCode: "FORBIDDEN"
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            requestId: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+            timestamp: "2026-04-17T10:30:00+00:00"
+            path: "/v1/citizen/tracking/lookup"
+            method: "POST"
             details: []
 
     InternalServerError:
@@ -2070,5 +2391,10 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             message: "Internal server error"
+            errorCode: "INTERNAL_ERROR"
             traceId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            requestId: "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d"
+            timestamp: "2026-04-17T10:30:00+00:00"
+            path: "/v1/rescue-requests"
+            method: "POST"
             details: []

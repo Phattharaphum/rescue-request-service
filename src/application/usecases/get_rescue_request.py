@@ -4,6 +4,7 @@ from src.adapters.persistence.rescue_request_repository import (
     list_citizen_updates,
     list_events,
 )
+from src.application.usecases.current_state_projection import clean_current_state_item
 from src.shared.errors import NotFoundError
 from src.shared.logger import get_logger
 
@@ -19,7 +20,7 @@ def execute(request_id: str, include_events: bool = False, include_citizen_updat
 
     result = {
         "master": _clean_item(master),
-        "currentState": _clean_item(current) if current else None,
+        "currentState": clean_current_state_item(current) if current else None,
     }
 
     updates_result = list_citizen_updates(request_id, limit=100)

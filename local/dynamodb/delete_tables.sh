@@ -18,4 +18,11 @@ aws dynamodb delete-table \
   --region "$REGION" \
   2>/dev/null || echo "IdempotencyTable does not exist"
 
+echo "Deleting IncidentCatalogTable..."
+aws dynamodb delete-table \
+  --table-name IncidentCatalogTable \
+  --endpoint-url "$ENDPOINT" \
+  --region "$REGION" \
+  2>/dev/null || echo "IncidentCatalogTable does not exist"
+
 echo "Tables deleted."

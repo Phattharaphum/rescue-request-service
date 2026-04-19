@@ -94,7 +94,7 @@ def _triage_request(request_id: str) -> None:
         "body": json.dumps({
             "changedBy": "dispatcher-01",
             "changedByRole": "dispatcher",
-            "priorityScore": 75.0,
+            "priorityScore": 0.75,
             "priorityLevel": "HIGH",
             "note": "Verified and forwarded",
         }),

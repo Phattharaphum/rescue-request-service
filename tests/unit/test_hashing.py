@@ -1,4 +1,10 @@
-from src.adapters.utils.hashing import hash_idempotency_key, hash_phone, hash_request_fingerprint, hash_tracking_code
+from src.adapters.utils.hashing import (
+    hash_idempotency_key,
+    hash_phone,
+    hash_request_fingerprint,
+    hash_scoped_idempotency_key,
+    hash_tracking_code,
+)
 
 
 class TestHashFunctions:
@@ -30,6 +36,12 @@ class TestHashFunctions:
         h1 = hash_idempotency_key("550e8400-e29b-41d4-a716-446655440000")
         h2 = hash_idempotency_key("550e8400-e29b-41d4-a716-446655440000")
         assert h1 == h2
+
+    def test_hash_scoped_idempotency_key_changes_with_scope(self):
+        key = "550e8400-e29b-41d4-a716-446655440000"
+        h1 = hash_scoped_idempotency_key(key, "POST:/v1/rescue-requests")
+        h2 = hash_scoped_idempotency_key(key, "PATCH:/v1/rescue-requests/abc")
+        assert h1 != h2
 
     def test_hash_request_fingerprint_deterministic(self):
         h1 = hash_request_fingerprint('{"key": "value"}')

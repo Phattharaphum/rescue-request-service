@@ -1,17 +1,15 @@
-version: '3.8'
-
 networks:
   rescue-net:
     name: rescue-net
 
 services:
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3.0
     container_name: localstack
     ports:
       - "4566:4566"
     environment:
-      - SERVICES=dynamodb,sns,sqs
+      - SERVICES=dynamodb,sns,sqs,secretsmanager,events,cloudwatch,logs
       - AWS_DEFAULT_REGION=ap-southeast-1
     networks:
       - rescue-net

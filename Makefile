@@ -1,4 +1,4 @@
-.PHONY: install lint test test-unit test-integration build local-start local-stop local-db-start local-db-reset local-db-stop deploy-dev deploy-prod clean validate
+.PHONY: install lint test test-unit test-integration build local-start local-stop local-db-start local-db-reset local-db-stop local-bootstrap deploy-dev deploy-prod clean validate
 
 install:
 	pip install -r requirements.txt
@@ -25,7 +25,10 @@ build:
 
 local-db-start:
 	cd local && (docker compose up -d localstack || docker-compose up -d localstack)
-	powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:DYNAMODB_ENDPOINT='http://localhost:4566'; $$env:AWS_REGION='ap-southeast-1'; $$env:AWS_ACCESS_KEY_ID='test'; $$env:AWS_SECRET_ACCESS_KEY='test'; & './local/dynamodb/create_tables.ps1'"
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:DYNAMODB_ENDPOINT='http://localhost:4566'; $$env:AWS_REGION='ap-southeast-1'; $$env:AWS_ACCESS_KEY_ID='test'; $$env:AWS_SECRET_ACCESS_KEY='test'; & './local/dynamodb/create_tables.ps1'; & './local/bootstrap/bootstrap_resources.ps1'"
+
+local-bootstrap:
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:DYNAMODB_ENDPOINT='http://localhost:4566'; $$env:AWS_REGION='ap-southeast-1'; $$env:AWS_ACCESS_KEY_ID='test'; $$env:AWS_SECRET_ACCESS_KEY='test'; & './local/bootstrap/bootstrap_resources.ps1'"
 
 local-db-reset: local-db-start
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:DYNAMODB_ENDPOINT='http://localhost:4566'; $$env:AWS_ACCESS_KEY_ID='test'; $$env:AWS_SECRET_ACCESS_KEY='test'; & './local/dynamodb/reset_tables.ps1'"

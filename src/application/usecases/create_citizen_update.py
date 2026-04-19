@@ -7,6 +7,7 @@ from src.adapters.persistence.rescue_request_repository import (
     get_master,
     get_current_state,
     put_citizen_update,
+    update_current_fields,
     update_master_fields,
 )
 from src.adapters.utils.hashing import hash_tracking_code
@@ -46,16 +47,18 @@ def execute(
     if payload_errors:
         raise ValidationError("Input validation failed", payload_errors)
 
+    idempotency_reservation: dict | None = None
     if idempotency_key:
-        replay = check_and_reserve(
+        idempotency_reservation = check_and_reserve(
             idempotency_key=idempotency_key,
             operation_name="CreateCitizenUpdate",
+            resource_scope=f"POST:/v1/citizen/rescue-requests/{request_id}/updates",
             request_body=body,
             request_ip=client_ip,
             user_agent=user_agent,
         )
-        if replay and replay.get("replay"):
-            return json.loads(replay["body"])
+        if idempotency_reservation and idempotency_reservation.get("replay"):
+            return json.loads(idempotency_reservation["body"])
 
     current = get_current_state(request_id)
     master = get_master(request_id)
@@ -93,7 +96,13 @@ def execute(
         update_master_fields(request_id, {"lastCitizenUpdateAt": now})
     except Exception as e:
         if idempotency_key:
-            finalize_failure(idempotency_key, "UPDATE_FAILED", str(e))
+            finalize_failure(
+                idempotency_key=idempotency_key,
+                error_code="UPDATE_FAILED",
+                error_message=str(e),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
         raise
 
     result = {
@@ -108,16 +117,27 @@ def execute(
             idempotency_key=idempotency_key,
             response_status_code=201,
             response_body=json.dumps(result),
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
         )
 
     try:
-        publish_citizen_updated(
+        header = publish_citizen_updated(
             request_id=request_id,
             update_id=update_id,
             update_type=update_type.value,
             update_payload=body["updatePayload"],
             created_at=now,
         )
+        if header:
+            update_current_fields(
+                request_id=request_id,
+                updates={
+                    "latestPrioritySourceEventId": header["messageId"],
+                    "latestPrioritySourceEventType": header["eventType"],
+                    "latestPrioritySourceOccurredAt": header["occurredAt"],
+                },
+            )
     except Exception:
         logger.exception("Failed to publish citizen-updated event")
 
@@ -134,20 +154,26 @@ def _validate_update_payload(update_type: UpdateType, payload: Any) -> list[dict
             errors.append({"field": "updatePayload.note", "issue": "is required and must be a non-empty string"})
     elif update_type == UpdateType.LOCATION_DETAILS:
         if not _non_empty_string(payload.get("locationDetails")):
-            errors.append({"field": "updatePayload.locationDetails", "issue": "is required and must be a non-empty string"})
+            errors.append(
+                {"field": "updatePayload.locationDetails", "issue": "is required and must be a non-empty string"}
+            )
     elif update_type == UpdateType.PEOPLE_COUNT:
         people_count = payload.get("peopleCount")
         if not isinstance(people_count, int) or people_count < 1:
             errors.append({"field": "updatePayload.peopleCount", "issue": "must be an integer greater than 0"})
     elif update_type == UpdateType.SPECIAL_NEEDS:
         if not _non_empty_string(payload.get("specialNeeds")):
-            errors.append({"field": "updatePayload.specialNeeds", "issue": "is required and must be a non-empty string"})
+            errors.append(
+                {"field": "updatePayload.specialNeeds", "issue": "is required and must be a non-empty string"}
+            )
     elif update_type == UpdateType.CONTACT_INFO:
         if not _non_empty_string(payload.get("contactPhone")) and not _non_empty_string(payload.get("contactName")):
-            errors.append({
-                "field": "updatePayload",
-                "issue": "at least one of contactPhone/contactName is required for CONTACT_INFO",
-            })
+            errors.append(
+                {
+                    "field": "updatePayload",
+                    "issue": "at least one of contactPhone/contactName is required for CONTACT_INFO",
+                }
+            )
         if _non_empty_string(payload.get("contactPhone")):
             for phone_error in validate_phone(payload["contactPhone"]):
                 errors.append({"field": "updatePayload.contactPhone", "issue": phone_error["issue"]})

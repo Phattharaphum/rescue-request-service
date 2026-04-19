@@ -100,7 +100,7 @@ class TestCitizenStatusFlow:
             "body": json.dumps({
                 "changedBy": "dispatcher-01",
                 "changedByRole": "dispatcher",
-                "priorityScore": 75.0,
+                "priorityScore": 0.75,
                 "priorityLevel": "HIGH",
                 "note": "Verified and forwarded",
                 "meta": {"queue": "A1", "channel": "RADIO"},

@@ -5,7 +5,7 @@ from src.application.usecases import update_rescue_request_priority as usecase
 from src.shared.errors import ConflictError, ValidationError
 
 
-def _base_current_state(priority_score: float | int | None = 40.0) -> dict:
+def _base_current_state(priority_score: float | int | None = 0.4) -> dict:
     return {
         "requestId": "req-1",
         "status": "TRIAGED",
@@ -38,26 +38,26 @@ def test_updates_priority_fields_and_publishes_priority_event(monkeypatch):
 
     result = usecase.execute(
         request_id="req-1",
-        body={"priorityScore": 75.5, "priorityLevel": "HIGH", "note": "Escalated"},
+        body={"priorityScore": 0.755, "priorityLevel": "HIGH", "note": "Escalated"},
         expected_version=2,
     )
 
     assert result["requestId"] == "req-1"
-    assert result["priorityScore"] == 75.5
+    assert result["priorityScore"] == 0.755
     assert result["priorityLevel"] == "HIGH"
     assert result["note"] == "Escalated"
     assert result["updated"] == ["priorityScore", "priorityLevel", "note"]
 
     assert updated_calls["request_id"] == "req-1"
     assert updated_calls["expected_version"] == 2
-    assert updated_calls["updates"]["priorityScore"] == 75.5
+    assert updated_calls["updates"]["priorityScore"] == 0.755
     assert updated_calls["updates"]["priorityLevel"] == "HIGH"
     assert updated_calls["updates"]["latestNote"] == "Escalated"
     assert "lastUpdatedAt" in updated_calls["updates"]
 
     assert published_calls["request_id"] == "req-1"
-    assert published_calls["previous_priority_score"] == 40.0
-    assert published_calls["new_priority_score"] == 75.5
+    assert published_calls["previous_priority_score"] == 0.4
+    assert published_calls["new_priority_score"] == 0.755
     assert published_calls["priority_level"] == "HIGH"
     assert published_calls["note"] == "Escalated"
     assert published_calls["correlation_id"] == "req-1"
@@ -87,7 +87,7 @@ def test_rejects_terminal_request(monkeypatch):
     monkeypatch.setattr(usecase, "get_current_state", lambda request_id: state)
 
     with pytest.raises(ConflictError):
-        usecase.execute(request_id="req-1", body={"priorityScore": 99})
+        usecase.execute(request_id="req-1", body={"priorityScore": 0.99})
 
 
 def test_requires_valid_priority_score(monkeypatch):
@@ -95,6 +95,13 @@ def test_requires_valid_priority_score(monkeypatch):
 
     with pytest.raises(ValidationError):
         usecase.execute(request_id="req-1", body={"priorityScore": "high"})
+
+
+def test_rejects_out_of_range_priority_score(monkeypatch):
+    monkeypatch.setattr(usecase, "get_current_state", lambda request_id: _base_current_state())
+
+    with pytest.raises(ValidationError):
+        usecase.execute(request_id="req-1", body={"priorityScore": 1.01})
 
 
 def test_conditional_check_failure_returns_conflict(monkeypatch):
@@ -109,4 +116,4 @@ def test_conditional_check_failure_returns_conflict(monkeypatch):
     monkeypatch.setattr(usecase, "update_current_fields", _raise_conditional)
 
     with pytest.raises(ConflictError):
-        usecase.execute(request_id="req-1", body={"priorityScore": 77.0}, expected_version=2)
+        usecase.execute(request_id="req-1", body={"priorityScore": 0.77}, expected_version=2)

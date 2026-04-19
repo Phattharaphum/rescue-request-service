@@ -8,7 +8,7 @@ from src.adapters.persistence.rescue_request_repository import (
 )
 from src.domain.enums.request_status import RequestStatus
 from src.domain.rules.transition_rules import validate_transition, validate_transition_requirements
-from src.shared.errors import ConflictError, NotFoundError
+from src.shared.errors import ConflictError, NotFoundError, ValidationError
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,6 +39,7 @@ def execute_transition(
 
     validate_transition(current_status, new_status)
     validate_transition_requirements(new_status, payload)
+    _validate_optional_priority_score(payload)
 
     new_version = current_version + 1
     event_id = str(uuid.uuid4())
@@ -95,3 +96,22 @@ def execute_transition(
         "version": new_version,
         "occurredAt": now,
     }
+
+
+def _validate_optional_priority_score(payload: dict[str, Any]) -> None:
+    if "priorityScore" not in payload or payload.get("priorityScore") is None:
+        return
+
+    priority_score = payload.get("priorityScore")
+    if isinstance(priority_score, bool) or not isinstance(priority_score, (int, float)):
+        raise ValidationError(
+            "priorityScore must be a number between 0 and 1",
+            [{"field": "priorityScore", "issue": "must be a number between 0 and 1"}],
+        )
+
+    resolved = float(priority_score)
+    if resolved < 0 or resolved > 1:
+        raise ValidationError(
+            "priorityScore must be a number between 0 and 1",
+            [{"field": "priorityScore", "issue": "must be a number between 0 and 1"}],
+        )

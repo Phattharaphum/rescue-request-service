@@ -19,6 +19,7 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [GET /citizen/rescue-requests/{requestId}/status](#63-get-citizenrescue-requestsrequestidstatus)
    - [POST /citizen/rescue-requests/{requestId}/updates](#64-post-citizenrescue-requestsrequestidupdates)
    - [GET /citizen/rescue-requests/{requestId}/updates](#65-get-citizenrescue-requestsrequestidupdates)
+   - [GET /incidents](#66-get-incidents)
 7. [Staff Endpoints](#7-staff-endpoints)
    - [GET /rescue-requests/{requestId}](#71-get-rescue-requestsrequestid)
    - [PATCH /rescue-requests/{requestId}](#72-patch-rescue-requestsrequestid)
@@ -35,21 +36,28 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [POST /rescue-requests/{requestId}/resolve](#84-post-rescue-requestsrequestidresolve)
    - [POST /rescue-requests/{requestId}/cancel](#85-post-rescue-requestsrequestidcancel)
 9. [State Machine](#9-state-machine)
-10. [Async Events (SNS)](#10-async-events-sns)
+10. [Async Integrations](#10-async-integrations)
 11. [Idempotency](#11-idempotency)
 12. [Duplicate Detection](#12-duplicate-detection)
+13. [Internal Endpoints](#13-internal-endpoints)
+   - [GET /internal/incidents/catalog](#131-get-internalincidentscatalog)
 
 ---
 
 ## 1. Overview
 
 The Rescue Request Service provides a REST API for managing disaster rescue requests.
+It also exposes a local incident catalog for request creation. That catalog is refreshed
+asynchronously from IncidentTracking Service every 30 minutes, while the API itself reads
+from the service database snapshot. The incident catalog table is also bootstrapped with
+five hardmock rows (`IncidentA` through `IncidentE`) for internal testing and UI bootstrap.
 
 | API Group | Audience | Auth Required |
 |-----------|----------|---------------|
 | **Public** | Citizens | No |
 | **Staff** | Emergency-response staff | No (prepared for future) |
 | **Commands** | Staff — state-machine transitions | No (prepared for future) |
+| **Internal** | Internal operations/support tooling | No (network-restricted usage expected) |
 
 ---
 
@@ -61,7 +69,7 @@ The Rescue Request Service provides a REST API for managing disaster rescue requ
 | `If-Match` | Request | Current `stateVersion` integer. Enforced on `POST /rescue-requests/{requestId}/events`, command endpoints, and `PATCH /rescue-requests/{requestId}/priority`. `PATCH /rescue-requests/{requestId}` currently accepts the header but does not enforce version checks. |
 | `X-Forwarded-For` | Request | Client IP, set automatically by API Gateway. |
 | `User-Agent` | Request | Client user-agent string. |
-| `X-Trace-Id` | Response | UUID included in every response for request tracing. |
+| `X-Trace-Id` | Response | Trace identifier included in every response. On error responses it matches `traceId` in the JSON body. |
 | `Access-Control-Allow-Origin` | Response | Reflected when the request `Origin` is one of: `https://rescue-request.phatphum.me`, `http://localhost:3000` |
 | `Vary` | Response | Always `Origin` on application responses |
 
@@ -96,16 +104,23 @@ All errors share the same JSON structure:
 ```json
 {
   "message": "Human-readable description",
+  "errorCode": "BAD_REQUEST",
   "traceId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "requestId": "3c85c0c5-4c2e-4c6a-9d50-8e6fd2f9ed0d",
+  "timestamp": "2026-04-17T10:30:00+00:00",
+  "path": "/v1/rescue-requests",
+  "method": "POST",
   "details": [
     { "field": "contactPhone", "issue": "invalid phone number format" }
   ]
 }
 ```
 
+`details` is always present and is an empty array when there are no field-level issues.
+
 | HTTP Status | Error Code | When |
 |-------------|------------|------|
-| `400` | `BAD_REQUEST` | Malformed request |
+| `400` | `BAD_REQUEST` | Malformed request, invalid JSON, invalid query/header/path coercion |
 | `403` | `FORBIDDEN` | Phone + tracking code combination is invalid |
 | `404` | `NOT_FOUND` | Resource does not exist |
 | `409` | `CONFLICT` | Invalid state transition / version mismatch / duplicate / idempotency key reused with different payload |
@@ -177,7 +192,7 @@ the same incident, phone, request type, approximate location, and submission tim
 | Body | `contactName` | string | **Yes** | Primary contact's full name |
 | Body | `contactPhone` | string (7-20 chars) | **Yes** | Contact phone number. Current validation accepts digits, spaces, `+`, `-`, and parentheses. |
 | Body | `sourceChannel` | SourceChannel | **Yes** | Submission channel |
-| Body | `specialNeeds` | string \| null | No | Medical/mobility requirements |
+| Body | `specialNeeds` | string \| string[] \| null | No | Medical/mobility requirements. The current implementation stores the provided value as-is for create/PATCH flows. |
 | Body | `locationDetails` | string \| null | No | Additional location hints |
 | Body | `province` | string \| null | No | Province / region |
 | Body | `district` | string \| null | No | District |
@@ -223,7 +238,7 @@ the same incident, phone, request type, approximate location, and submission tim
 | `status` | RequestStatus | Always `SUBMITTED` |
 | `submittedAt` | ISO-8601 | UTC submission timestamp |
 
-**Error responses:** `409` (phone already exists / duplicate), `422` (validation)
+**Error responses:** `400` (invalid JSON), `409` (phone already exists / duplicate), `422` (validation)
 
 ---
 
@@ -254,7 +269,7 @@ Looks up a rescue request using the citizen's phone number and tracking code.
 }
 ```
 
-**Error responses:** `403` (phone/code combination invalid), `422` (missing fields)
+**Error responses:** `400` (invalid JSON), `403` (phone/code combination invalid), `422` (missing fields)
 
 ---
 
@@ -310,7 +325,7 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
     "meta": {
       "dispatchChannel": "RADIO"
     },
-    "priorityScore": 85.5,
+    "priorityScore": 0.855,
     "responderUnitId": "UNIT-007"
   },
   "recentEvents": [
@@ -324,7 +339,7 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
       "meta": {
         "dispatchChannel": "RADIO"
       },
-      "priorityScore": 85.5,
+      "priorityScore": 0.855,
       "responderUnitId": "UNIT-007"
     }
   ]
@@ -341,7 +356,7 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
 | `nextSuggestedAction` | string \| null | Suggested action for the citizen |
 | `description` | string \| null | Original request description |
 | `peopleCount` | integer \| null | Latest known affected people count |
-| `specialNeeds` | string \| null | Special-needs details |
+| `specialNeeds` | string \| string[] \| null | Special-needs details |
 | `submittedAt` | ISO-8601 \| null | Initial submission time |
 | `lastCitizenUpdateAt` | ISO-8601 \| null | Last citizen update timestamp |
 | `contactName` | string \| null | Contact name on the request |
@@ -356,7 +371,7 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
 | `latestEvent` | object \| null | Most recent status event (includes `meta`) |
 | `recentEvents` | array | Up to 5 latest status events (newest first) |
 
-**Error responses:** `404`
+**Error responses:** `400` (invalid requestId format), `404`
 
 ---
 
@@ -404,7 +419,7 @@ Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELL
 }
 ```
 
-**Error responses:** `403` (trackingCode invalid), `404`, `409` (terminal state), `422`
+**Error responses:** `400` (invalid JSON / invalid requestId format), `403` (trackingCode invalid), `404`, `409` (terminal state), `422`
 
 ---
 
@@ -438,7 +453,61 @@ Returns a paginated list of all citizen-submitted updates for a rescue request.
 }
 ```
 
-**Error responses:** `400` (invalid `since` format), `404` (request not found)
+**Error responses:** `400` (invalid requestId / pagination / `since` format), `404` (request not found)
+
+---
+
+### 6.6 GET /incidents
+
+Returns the locally stored incident catalog used by clients when selecting an incident.
+
+This endpoint reads from the service database, not from IncidentTracking Service inline.
+The catalog is refreshed asynchronously every 30 minutes, so temporary upstream sync
+failures do not block client reads.
+The table is also bootstrapped with five hardmock rows `IncidentA` through `IncidentE`.
+
+#### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | 20 | Max results (1–100) |
+| `cursor` | string | — | Pagination cursor |
+| `status` | string | — | Filter by the locally stored incident status snapshot |
+
+#### Response `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "incidentId": "019C774D-1AC5-758B-AE95-5CD4AEB89258",
+      "incidentType": "fire",
+      "incidentName": "IncidentA",
+      "incidentSequence": 1,
+      "status": "REPORTED",
+      "incidentDescription": "Fire reported near TU Dome (Verified)",
+      "remoteCreatedAt": "2026-02-22T00:00:00Z",
+      "remoteUpdatedAt": "2026-02-22T00:01:04Z",
+      "lastSyncedAt": "2026-04-17T08:30:00+00:00"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `incidentId` | string | Incident ID from IncidentTracking Service |
+| `incidentType` | string \| null | Incident category |
+| `incidentName` | string | Stable local display name, generated as `IncidentA`, `IncidentB`, `IncidentC`, ... |
+| `incidentSequence` | integer | Sequence number used to derive `incidentName` |
+| `status` | string \| null | Latest incident status stored in the local catalog |
+| `incidentDescription` | string \| null | Incident description from upstream |
+| `remoteCreatedAt` | ISO-8601 \| null | Upstream incident creation time, if present |
+| `remoteUpdatedAt` | ISO-8601 \| null | Upstream incident update time, if present |
+| `lastSyncedAt` | ISO-8601 \| null | Last successful refresh time for this row |
+
+**Error responses:** `400` (invalid pagination), `500`
 
 ---
 
@@ -488,13 +557,18 @@ Optionally embeds the status-event history.
     "lastEventId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "stateVersion": 3,
     "status": "ASSIGNED",
-    "priorityScore": 85.5,
+    "priorityScore": 0.855,
     "priorityLevel": "HIGH",
     "assignedUnitId": "UNIT-007",
     "assignedAt": "2024-01-15T11:00:00.000000+00:00",
     "latestNote": "Team dispatched, ETA 15 minutes",
     "lastUpdatedBy": "dispatcher-01",
-    "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+    "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
+    "latestPriorityEvaluationId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+    "latestPriorityReason": "Children and bedridden residents need urgent rescue.",
+    "latestPriorityEvaluatedAt": "2026-04-17T00:04:30+00:00",
+    "latestPriorityCorrelationId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+    "lastPriorityIngestedAt": "2026-04-17T00:05:00+00:00"
   },
   "updateItems": [
     {
@@ -511,8 +585,10 @@ Optionally embeds the status-event history.
 
 When `includeEvents=true` an `"events"` array is added.
 When `includeCitizenUpdates=true` a `"citizenUpdates"` array is also returned as a backward-compatible alias of `updateItems`.
+`master.specialNeeds` can currently be a string, an array of strings, or `null`.
+`currentState` includes the latest ingested prioritization evaluation metadata when available.
 
-**Error responses:** `404`
+**Error responses:** `400` (invalid requestId format), `404`
 
 ---
 
@@ -521,6 +597,9 @@ When `includeCitizenUpdates=true` a `"citizenUpdates"` array is also returned as
 Partially updates the master record of a rescue request.
 
 **Allowed fields:** `description`, `peopleCount`, `specialNeeds`, `locationDetails`, `addressLine`
+
+`specialNeeds` is not strictly shape-validated by the current PATCH implementation, so
+existing records may contain a string, an array of strings, or `null`.
 
 **Forbidden fields:** `incidentId`, `status`, `requestId` — returning these in the body causes `422`.
 
@@ -555,7 +634,7 @@ Cannot be called when the request is in a terminal state.
 `PATCH /rescue-requests/{requestId}` currently also publishes a `rescue-request.citizen-updated`
 SNS event with `updateType: "PATCH"` and `updateId: "patch"`.
 
-**Error responses:** `404`, `409` (terminal state / idempotency conflict), `422`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409` (terminal state / idempotency conflict), `422`
 
 ---
 
@@ -586,7 +665,7 @@ Returns a paginated list of status-change events for a rescue request.
       "changedByRole": "dispatcher",
       "changeReason": "Request verified, forwarding to field team",
       "meta": null,
-      "priorityScore": 75.0,
+      "priorityScore": 0.75,
       "responderUnitId": null,
       "version": 2,
       "occurredAt": "2024-01-15T10:35:00.000000+00:00"
@@ -595,6 +674,8 @@ Returns a paginated list of status-change events for a rescue request.
   "nextCursor": null
 }
 ```
+
+**Error responses:** `400` (invalid requestId / pagination / `sinceVersion` / `order`)
 
 ---
 
@@ -615,7 +696,7 @@ dedicated [Command Endpoints](#8-command-endpoints-state-machine).
 | Body | `changedByRole` | string | **Yes** | Staff member role |
 | Body | `reason` | string \| null | No | Stored on the event as `changeReason`; required when `newStatus=CANCELLED` |
 | Body | `responderUnitId` | string \| null | No | Required when `newStatus=ASSIGNED` |
-| Body | `priorityScore` | number \| null | No | Numerical priority score |
+| Body | `priorityScore` | number \| null | No | Numerical priority score between `0` and `1` |
 | Body | `priorityLevel` | string \| null | No | Human-readable priority label |
 | Body | `note` | string \| null | No | Operational note |
 | Body | `meta` | object \| null | No | Arbitrary additional metadata |
@@ -632,7 +713,7 @@ dedicated [Command Endpoints](#8-command-endpoints-state-machine).
 
 #### Response `200 OK` — [StatusTransitionResponse](#statustransitionresponse)
 
-**Error responses:** `404`, `409`, `422`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`, `422`
 
 ---
 
@@ -649,17 +730,25 @@ Returns the latest state snapshot for a rescue request.
   "lastEventId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "stateVersion": 3,
   "status": "ASSIGNED",
-  "priorityScore": 85.5,
+  "priorityScore": 0.855,
   "priorityLevel": "HIGH",
   "assignedUnitId": "UNIT-007",
   "assignedAt": "2024-01-15T11:00:00.000000+00:00",
   "latestNote": "Team dispatched, ETA 15 minutes",
   "lastUpdatedBy": "staff-001",
-  "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+  "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
+  "latestPriorityEvaluationId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+  "latestPriorityReason": "Children and bedridden residents need urgent rescue.",
+  "latestPriorityEvaluatedAt": "2026-04-17T00:04:30+00:00",
+  "latestPriorityCorrelationId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+  "lastPriorityIngestedAt": "2026-04-17T00:05:00+00:00"
 }
 ```
 
-**Error responses:** `404`
+Prioritization-related fields on `currentState`:
+- `latestPriorityEvaluationId`, `latestPriorityReason`, `latestPriorityEvaluatedAt`, `latestPriorityCorrelationId`, `lastPriorityIngestedAt` track the latest evaluated result ingested back into the request.
+
+**Error responses:** `400` (invalid requestId format), `404`
 
 ---
 
@@ -708,19 +797,26 @@ Each item is the master request record enriched with the latest `status` and a
         "lastEventId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         "stateVersion": 3,
         "status": "ASSIGNED",
-        "priorityScore": 85.5,
+        "priorityScore": 0.855,
         "priorityLevel": "HIGH",
         "assignedUnitId": "UNIT-007",
         "assignedAt": "2024-01-15T11:00:00.000000+00:00",
         "latestNote": "Team dispatched, ETA 15 minutes",
         "lastUpdatedBy": "dispatcher-01",
-        "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00"
+        "lastUpdatedAt": "2024-01-15T11:00:00.000000+00:00",
+        "latestPriorityEvaluationId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
+        "latestPriorityReason": "Children and bedridden residents need urgent rescue.",
+        "latestPriorityEvaluatedAt": "2026-04-17T00:04:30+00:00",
+        "latestPriorityCorrelationId": "3df04bc4-1de3-49d0-a47c-b9e76d2bd36c",
+        "lastPriorityIngestedAt": "2026-04-17T00:05:00+00:00"
       }
     }
   ],
   "nextCursor": null
 }
 ```
+
+**Error responses:** `400` (invalid pagination / invalid status filter)
 
 ---
 
@@ -784,14 +880,14 @@ Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELL
 | Path | `requestId` | UUID | **Yes** | |
 | Header | `X-Idempotency-Key` | UUID | No | Idempotency key |
 | Header | `If-Match` | integer | No | Expected `stateVersion` for optimistic concurrency check |
-| Body | `priorityScore` | number \| null | No | New numerical priority score |
+| Body | `priorityScore` | number \| null | No | New numerical priority score between `0` and `1` |
 | Body | `priorityLevel` | string \| null | No | New human-readable priority label |
 | Body | `note` | string \| null | No | New operational note |
 
 **Example request body:**
 ```json
 {
-  "priorityScore": 92.5,
+  "priorityScore": 0.925,
   "priorityLevel": "CRITICAL",
   "note": "Escalated after reassessment"
 }
@@ -802,7 +898,7 @@ Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELL
 ```json
 {
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
-  "priorityScore": 92.5,
+  "priorityScore": 0.925,
   "priorityLevel": "CRITICAL",
   "note": "Escalated after reassessment",
   "updatedAt": "2024-01-15T11:05:00.000000+00:00",
@@ -813,7 +909,7 @@ Cannot be called when the request is in a terminal state (`RESOLVED` or `CANCELL
 When `priorityScore` changes, the service publishes a
 `rescue-request.priority-score-updated` SNS event.
 
-**Error responses:** `404`, `409`, `422`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`, `422`
 
 ---
 
@@ -821,6 +917,8 @@ When `priorityScore` changes, the service publishes a
 
 All command endpoints share the same response shape ([StatusTransitionResponse](#statustransitionresponse))
 and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
+If `changedBy` or `changedByRole` is omitted on command endpoints, the current implementation
+defaults both values to `"staff"`.
 
 ### StatusTransitionResponse
 
@@ -856,18 +954,18 @@ and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
 |-------|------|-------------|
 | `changedBy` | string | Staff identifier (default: `"staff"`) |
 | `changedByRole` | string | Staff role (default: `"staff"`) |
-| `priorityScore` | number \| null | Numerical priority |
+| `priorityScore` | number \| null | Numerical priority between `0` and `1` |
 | `priorityLevel` | string \| null | Human-readable priority label |
 | `note` | string \| null | Operational note |
 | `meta` | object \| null | Additional metadata |
 
-**Error responses:** `404`, `409`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`
 
 ---
 
 ### 8.2 POST /rescue-requests/{requestId}/assign
 
-`TRIAGED → ASSIGNED`
+`SUBMITTED → ASSIGNED` or `TRIAGED → ASSIGNED`
 
 **`responderUnitId` is required.**
 
@@ -878,12 +976,12 @@ and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
 | `responderUnitId` | string | **Yes** | Responding unit identifier |
 | `changedBy` | string | No | Staff identifier |
 | `changedByRole` | string | No | Staff role |
-| `priorityScore` | number \| null | No | |
+| `priorityScore` | number \| null | No | Numerical priority score between `0` and `1` |
 | `priorityLevel` | string \| null | No | |
 | `note` | string \| null | No | |
 | `meta` | object \| null | No | |
 
-**Error responses:** `404`, `409`, `422`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`, `422`
 
 ---
 
@@ -895,7 +993,7 @@ and accept the same optional headers (`X-Idempotency-Key`, `If-Match`).
 
 Same optional fields as [triage](#81-post-rescue-requestsrequestidtriage).
 
-**Error responses:** `404`, `409`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`
 
 ---
 
@@ -909,7 +1007,7 @@ Publishes `rescue-request.status-changed` and `rescue-request.resolved` SNS even
 
 Same optional fields as [triage](#81-post-rescue-requestsrequestidtriage).
 
-**Error responses:** `404`, `409`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`
 
 ---
 
@@ -930,7 +1028,7 @@ Publishes `rescue-request.status-changed` and `rescue-request.cancelled` SNS eve
 | `changedByRole` | string | No | Staff role |
 | `meta` | object \| null | No | Additional metadata |
 
-**Error responses:** `404`, `409`, `422`
+**Error responses:** `400` (invalid JSON / invalid requestId / invalid `If-Match`), `404`, `409`, `422`
 
 ---
 
@@ -939,6 +1037,7 @@ Publishes `rescue-request.status-changed` and `rescue-request.cancelled` SNS eve
 ```
 SUBMITTED ──/triage──▶ TRIAGED ──/assign──▶ ASSIGNED ──/start──▶ IN_PROGRESS ──/resolve──▶ RESOLVED
     │                     │                     │                      │
+    ├──────/assign────────▶                     │                      │
     └──────────────────────┴─────────────────────┴──────────────────────┴──/cancel──▶ CANCELLED
 ```
 
@@ -947,6 +1046,7 @@ SUBMITTED ──/triage──▶ TRIAGED ──/assign──▶ ASSIGNED ──/
 | From | To | Command |
 |------|----|---------|
 | `SUBMITTED` | `TRIAGED` | `/triage` |
+| `SUBMITTED` | `ASSIGNED` | `/assign` |
 | `TRIAGED` | `ASSIGNED` | `/assign` |
 | `ASSIGNED` | `IN_PROGRESS` | `/start` |
 | `IN_PROGRESS` | `RESOLVED` | `/resolve` |
@@ -967,12 +1067,12 @@ Attempting to transition from a terminal state (`RESOLVED` or `CANCELLED`) also 
 
 ---
 
-## 10. Async Events (SNS)
+## 10. Async Integrations
 
 **Topic:** `rescue-request-events-v1-{stage}`
 
-> **Internal stream relay:** The deployed `/stream` Lambda / Function URL is an internal relay for the first-party frontend only and is not part of the public REST API contract.
-> External systems that need pub/sub delivery should subscribe to the SNS topic directly, or attach their own SQS subscription, instead of depending on the internal stream Lambda.
+The internal `/stream` relay may normalize or repackage events for SSE delivery.
+That relay shape is internal-only and should not be treated as a public contract.
 
 Raw SNS messages are wrapped in the following envelope:
 
@@ -992,9 +1092,6 @@ Raw SNS messages are wrapped in the following envelope:
   "body": { }
 }
 ```
-
-The internal `/stream` relay may normalize or repackage events for SSE delivery.
-That relay shape is internal-only and should not be treated as a public contract.
 
 **SNS Message Attributes** (usable for subscription filters):
 
@@ -1017,6 +1114,91 @@ That relay shape is internal-only and should not be treated as a public contract
 
 > **Note:** Event publishing is non-blocking — a failure to publish does **not** cause the
 > HTTP request to fail.
+
+### Prioritization Result Ingest
+
+This service does not publish outbound prioritization commands or re-evaluation topics.
+Instead, it consumes evaluated results from Rescue Prioritization Service through one shared SQS queue:
+
+- queue: `rescue-prioritization-evaluated-{stage}`
+- DLQ: `rescue-prioritization-evaluated-dlq-{stage}`
+
+The shared queue can subscribe to two external SNS topics:
+
+- `rescue.prioritization.created.v1`
+- `rescue.prioritization.updated.v1`
+
+Optional stack parameters:
+
+- `PrioritizationCreatedTopicArn`
+- `PrioritizationUpdatedTopicArn`
+
+If either topic ARN is supplied, the stack creates the SNS-to-SQS subscription automatically.
+
+Canonical inbound `messageType` on both result topics is `RescueRequestEvaluatedEvent`.
+For transition compatibility, `RescueRequestReEvaluateEvent` is also accepted on
+`rescue.prioritization.updated.v1` only.
+
+Required inbound fields:
+
+- `header.messageType`
+- `header.correlationId`
+- `header.sentAt`
+- `header.version`
+- `body.requestId`
+- `body.incidentId`
+- `body.evaluateId`
+- `body.requestType`
+- `body.priorityScore`
+- `body.priorityLevel`
+- `body.evaluateReason`
+- `body.lastEvaluatedAt`
+- `body.description`
+- `body.location.latitude`
+- `body.location.longitude`
+- `body.peopleCount`
+
+Validation rules:
+
+- `incidentId` and `evaluateId` must be valid UUIDs
+- `priorityScore` must be a decimal between `0` and `1`
+- `priorityLevel` must be one of `LOW`, `NORMAL`, `HIGH`, `CRITICAL`
+- `submittedAt`, when provided, must be an ISO-8601 datetime
+- `location` must be present with numeric `latitude` and `longitude`
+- `correlationId` must match `CURRENT_STATE.latestPrioritySourceEventId`
+
+That correlation target comes from the latest service-owned source event published on
+`rescue-request-events-v1-{stage}`:
+
+- `rescue-request.created`
+- `rescue-request.citizen-updated`
+
+When an evaluated message is accepted, the request `currentState` is updated with:
+
+- `priorityScore`
+- `priorityLevel`
+- `status` (`SUBMITTED` requests move to `TRIAGED`; later non-terminal states are preserved)
+- `latestPriorityEvaluationId`
+- `latestPriorityReason`
+- `latestPriorityEvaluatedAt`
+- `latestPriorityCorrelationId`
+- `lastPriorityIngestedAt`
+
+Terminal requests are acknowledged and skipped. Result idempotency is keyed by `evaluateId`.
+
+### Incident Catalog Sync
+
+Incident data is synced from IncidentTracking Service into a dedicated local table:
+
+- Trigger: Amazon EventBridge schedule every 30 minutes
+- Lambda timeout: 30 seconds
+- External HTTP timeout: 30 seconds
+- Secret source: AWS Secrets Manager secret `rescue-request-service/incident-tracking/{stage}`
+- Required secret keys: `apiUrl`, `apiKey`
+- Optional secret keys: `accept`, `transactionIdHeader`
+
+`GET /incidents` reads only from the local table, so client reads remain available even if
+the upstream sync fails or times out.
 
 ---
 
@@ -1083,3 +1265,48 @@ existing request.
 > Idempotent retries are always safe.
 >
 > Phone uniqueness by `contactPhone` is still enforced globally.
+
+---
+
+## 13. Internal Endpoints
+
+### 13.1 GET /internal/incidents/catalog
+
+Returns every row currently stored in `IncidentCatalogTable` for internal tooling/support use.
+
+This endpoint returns the service's narrow internal shape and includes both:
+- the five hardmock seed rows (`IncidentA` through `IncidentE`)
+- any additional incidents synced from IncidentTracking Service
+
+#### Response `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "incident_id": "MOCK-INC-001",
+      "incident_type": "flood",
+      "incident_name": "IncidentA",
+      "status": "REPORTED",
+      "incident_description": "Mock flood incident for internal testing and UI bootstrap"
+    },
+    {
+      "incident_id": "019C774D-1AC5-758B-AE95-5CD4AEB89258",
+      "incident_type": "fire",
+      "incident_name": "IncidentF",
+      "status": "REPORTED",
+      "incident_description": "Fire reported near TU Dome (Verified)"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `incident_id` | string | Incident identifier stored in `IncidentCatalogTable` |
+| `incident_type` | string \| null | Incident type stored in the table |
+| `incident_name` | string \| null | Display name stored in the table |
+| `status` | string \| null | Status stored in the table |
+| `incident_description` | string \| null | Description stored in the table |
+
+**Error responses:** `500`

@@ -58,6 +58,23 @@ create_idempotency_table() {
     --region "$REGION" >/dev/null
 }
 
+create_incident_catalog_table() {
+  echo "Creating IncidentCatalogTable..."
+  aws dynamodb create-table \
+    --table-name IncidentCatalogTable \
+    --attribute-definitions \
+      AttributeName=incidentId,AttributeType=S \
+      AttributeName=catalogPartition,AttributeType=S \
+      AttributeName=catalogSortKey,AttributeType=S \
+    --key-schema \
+      AttributeName=incidentId,KeyType=HASH \
+    --global-secondary-indexes \
+      "[{\"IndexName\":\"CatalogOrderIndex\",\"KeySchema\":[{\"AttributeName\":\"catalogPartition\",\"KeyType\":\"HASH\"},{\"AttributeName\":\"catalogSortKey\",\"KeyType\":\"RANGE\"}],\"Projection\":{\"ProjectionType\":\"ALL\"}}]" \
+    --billing-mode PAY_PER_REQUEST \
+    --endpoint-url "$ENDPOINT" \
+    --region "$REGION" >/dev/null
+}
+
 ensure_table() {
   local table_name="$1"
   local create_func="$2"
@@ -74,4 +91,5 @@ ensure_table() {
 wait_for_dynamodb
 ensure_table "RescueRequestTable" "create_rescue_request_table"
 ensure_table "IdempotencyTable" "create_idempotency_table"
+ensure_table "IncidentCatalogTable" "create_incident_catalog_table"
 echo "Tables are ready."

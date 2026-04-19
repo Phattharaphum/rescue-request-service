@@ -12,6 +12,9 @@ class TestValidateTransition:
     def test_triaged_to_assigned(self):
         validate_transition(RequestStatus.TRIAGED, RequestStatus.ASSIGNED)
 
+    def test_submitted_to_assigned(self):
+        validate_transition(RequestStatus.SUBMITTED, RequestStatus.ASSIGNED)
+
     def test_assigned_to_in_progress(self):
         validate_transition(RequestStatus.ASSIGNED, RequestStatus.IN_PROGRESS)
 
@@ -29,10 +32,6 @@ class TestValidateTransition:
 
     def test_in_progress_to_cancelled(self):
         validate_transition(RequestStatus.IN_PROGRESS, RequestStatus.CANCELLED)
-
-    def test_invalid_submitted_to_assigned(self):
-        with pytest.raises(ConflictError):
-            validate_transition(RequestStatus.SUBMITTED, RequestStatus.ASSIGNED)
 
     def test_invalid_submitted_to_resolved(self):
         with pytest.raises(ConflictError):

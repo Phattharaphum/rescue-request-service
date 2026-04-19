@@ -216,6 +216,12 @@ def _is_key_type_mismatch_validation_error(error: ClientError) -> bool:
     return any(_contains_key_type_mismatch_message((reason or {}).get("Message")) for reason in cancellation_reasons)
 
 
+def _is_local_validation_wrapper_error(error: ClientError) -> bool:
+    message = (error.response.get("Error", {}) or {}).get("Message", "")
+    lowered = message.lower()
+    return "validationexception" in lowered or "invalid attribute value type" in lowered
+
+
 def _build_update_components(current_updates: dict[str, Any]) -> tuple[list[str], dict[str, str], dict[str, Any], dict[str, Any]]:
     update_expr_parts: list[str] = []
     expr_attr_names: dict[str, str] = {}
@@ -308,7 +314,9 @@ def create_rescue_request(
                 logger.error(f"Transaction cancelled: {e}")
                 raise ConflictError("Failed to create rescue request - transaction conflict")
 
-            if STAGE == "local" and error_code == "ValidationException":
+            if STAGE == "local" and (error_code == "ValidationException" or (
+                error_code == "InternalError" and _is_local_validation_wrapper_error(e)
+            )):
                 # LocalStack can reject transaction payloads that real DynamoDB accepts.
                 # Fallback keeps local development unblocked.
                 logger.warning("Falling back to non-transactional local write for create_rescue_request")
@@ -506,7 +514,9 @@ def append_event_and_update_current(request_id: str, event_item: dict, current_u
 
             logger.error(f"Transition transaction cancelled: {e}")
             raise ConflictError("State transition conflict - concurrent modification detected")
-        if STAGE == "local" and error_code == "ValidationException":
+        if STAGE == "local" and (error_code == "ValidationException" or (
+            error_code == "InternalError" and _is_local_validation_wrapper_error(e)
+        )):
             # LocalStack can reject some transaction payloads that DynamoDB accepts.
             # Fallback keeps local development unblocked while preserving conditional checks.
             logger.warning("Falling back to non-transactional local write due to ValidationException")
