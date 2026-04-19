@@ -27,12 +27,13 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
         raise ValidationError("RescueRequestEvaluatedEvent validation failed", errors)
 
     idempotency_key = f"RescueRequestEvaluatedEvent#{body['evaluateId']}"
-    replay = check_and_reserve(
+    idempotency_reservation = check_and_reserve(
         idempotency_key=idempotency_key,
         operation_name="IngestRescueRequestEvaluatedEvent",
+        resource_scope=f"SQS:/rescue-prioritization-evaluated/{body['requestId']}",
         request_body=message,
     )
-    if replay and replay.get("replay"):
+    if idempotency_reservation and idempotency_reservation.get("replay"):
         return {
             "status": "duplicate",
             "requestId": body["requestId"],
@@ -49,10 +50,12 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
         if expected_correlation != actual_correlation:
             raise ValidationError(
                 "RescueRequestEvaluatedEvent correlationId does not match the latest priority source event",
-                [{
-                    "field": "header.correlationId",
-                    "issue": f"expected {expected_correlation} but received {actual_correlation}",
-                }],
+                [
+                    {
+                        "field": "header.correlationId",
+                        "issue": f"expected {expected_correlation} but received {actual_correlation}",
+                    }
+                ],
             )
 
         current_status = RequestStatus(current["status"])
@@ -67,6 +70,8 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
                 response_status_code=200,
                 response_body=json.dumps(result, default=str),
                 result_resource_id=body["requestId"],
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
             )
             return result
 
@@ -97,10 +102,18 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
             response_status_code=200,
             response_body=json.dumps(result, default=str),
             result_resource_id=body["requestId"],
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
         )
         return result
     except Exception as exc:
-        finalize_failure(idempotency_key=idempotency_key, error_code="INGEST_EVALUATION_FAILED", error_message=str(exc))
+        finalize_failure(
+            idempotency_key=idempotency_key,
+            error_code="INGEST_EVALUATION_FAILED",
+            error_message=str(exc),
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+        )
         raise
 
 
@@ -108,10 +121,12 @@ def _validate_message(header: dict[str, Any], body: dict[str, Any]) -> list[dict
     errors: list[dict[str, str]] = []
 
     if not _is_supported_message_type(header):
-        errors.append({
-            "field": "header.messageType",
-            "issue": "must be RescueRequestEvaluatedEvent",
-        })
+        errors.append(
+            {
+                "field": "header.messageType",
+                "issue": "must be RescueRequestEvaluatedEvent",
+            }
+        )
 
     if not _is_iso_datetime(header.get("sentAt")):
         errors.append({"field": "header.sentAt", "issue": "must be a valid ISO-8601 datetime"})
@@ -141,10 +156,12 @@ def _validate_message(header: dict[str, Any], body: dict[str, Any]) -> list[dict
         errors.append({"field": "body.priorityScore", "issue": "must be a number between 0 and 1"})
 
     if body.get("priorityLevel") not in ALLOWED_PRIORITY_LEVELS:
-        errors.append({
-            "field": "body.priorityLevel",
-            "issue": f"must be one of: {', '.join(sorted(ALLOWED_PRIORITY_LEVELS))}",
-        })
+        errors.append(
+            {
+                "field": "body.priorityLevel",
+                "issue": f"must be one of: {', '.join(sorted(ALLOWED_PRIORITY_LEVELS))}",
+            }
+        )
 
     if not _non_empty_text(body.get("evaluateReason")):
         errors.append({"field": "body.evaluateReason", "issue": "is required"})
@@ -198,7 +215,9 @@ def _normalize_message(message: dict[str, Any]) -> dict[str, Any]:
     }
 
     normalized_body = dict(raw_body)
-    normalized_body["evaluateId"] = raw_body.get("evaluateId") or raw_body.get("evaluationId") or raw_header.get("messageId")
+    normalized_body["evaluateId"] = (
+        raw_body.get("evaluateId") or raw_body.get("evaluationId") or raw_header.get("messageId")
+    )
     normalized_body["evaluateReason"] = raw_body.get("evaluateReason") or raw_body.get("reason")
     normalized_body["lastEvaluatedAt"] = raw_body.get("lastEvaluatedAt") or raw_body.get("evaluatedAt")
 

@@ -17,6 +17,7 @@ def execute(
     idempotency_key: str | None = None,
     expected_version: int | None = None,
 ) -> dict:
+    idempotency_reservation: dict | None = None
     errors = validate_required_fields(body, ["newStatus", "changedBy", "changedByRole"])
     if errors:
         raise ValidationError("Input validation failed", errors)
@@ -30,13 +31,14 @@ def execute(
         )
 
     if idempotency_key:
-        replay = check_and_reserve(
+        idempotency_reservation = check_and_reserve(
             idempotency_key=idempotency_key,
             operation_name="AppendStatusEvent",
+            resource_scope=f"POST:/v1/rescue-requests/{request_id}/events",
             request_body=body,
         )
-        if replay and replay.get("replay"):
-            return json.loads(replay["body"])
+        if idempotency_reservation and idempotency_reservation.get("replay"):
+            return json.loads(idempotency_reservation["body"])
 
     try:
         result = execute_transition(
@@ -49,7 +51,13 @@ def execute(
         )
     except Exception as e:
         if idempotency_key:
-            finalize_failure(idempotency_key, "TRANSITION_FAILED", str(e))
+            finalize_failure(
+                idempotency_key=idempotency_key,
+                error_code="TRANSITION_FAILED",
+                error_message=str(e),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
         raise
 
     if idempotency_key:
@@ -57,6 +65,8 @@ def execute(
             idempotency_key=idempotency_key,
             response_status_code=200,
             response_body=json.dumps(result, default=str),
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
         )
 
     try:

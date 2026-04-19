@@ -13,5 +13,9 @@ def hash_idempotency_key(key: str) -> str:
     return hashlib.sha256(f"idempotency:{key}".encode("utf-8")).hexdigest()
 
 
+def hash_scoped_idempotency_key(key: str, scope: str) -> str:
+    return hashlib.sha256(f"idempotency:{scope}:{key}".encode("utf-8")).hexdigest()
+
+
 def hash_request_fingerprint(payload_json: str) -> str:
     return hashlib.sha256(f"fingerprint:{payload_json}".encode("utf-8")).hexdigest()

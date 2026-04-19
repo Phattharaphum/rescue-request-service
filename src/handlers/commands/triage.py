@@ -16,11 +16,17 @@ def handler(event, context):
         idempotency_key = get_header(event, "X-Idempotency-Key")
         if_match = get_header(event, "If-Match")
         expected_version = parse_optional_int(if_match, "If-Match", minimum=1)
+        idempotency_reservation: dict | None = None
 
         if idempotency_key:
-            replay = check_and_reserve(idempotency_key, "Triage", body)
-            if replay and replay.get("replay"):
-                return ok(json.loads(replay["body"]), event)
+            idempotency_reservation = check_and_reserve(
+                idempotency_key=idempotency_key,
+                operation_name="Triage",
+                resource_scope=f"POST:/v1/rescue-requests/{request_id}/triage",
+                request_body=body,
+            )
+            if idempotency_reservation and idempotency_reservation.get("replay"):
+                return ok(json.loads(idempotency_reservation["body"]), event)
 
         try:
             result = execute_transition(
@@ -33,18 +39,31 @@ def handler(event, context):
             )
         except Exception as e:
             if idempotency_key:
-                finalize_failure(idempotency_key, "TRIAGE_FAILED", str(e))
+                finalize_failure(
+                    idempotency_key=idempotency_key,
+                    error_code="TRIAGE_FAILED",
+                    error_message=str(e),
+                    idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                    lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+                )
             raise
 
         if idempotency_key:
-            finalize_success(idempotency_key, 200, json.dumps(result, default=str))
+            finalize_success(
+                idempotency_key=idempotency_key,
+                response_status_code=200,
+                response_body=json.dumps(result, default=str),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
 
         try:
-            publish_status_changed(request_id, result["previousStatus"], result["newStatus"], result["eventId"], result["version"])
+            publish_status_changed(
+                request_id, result["previousStatus"], result["newStatus"], result["eventId"], result["version"]
+            )
         except Exception:
             pass
 
         return ok(result, event)
     except Exception as e:
         return handle_error(e, event)
-

@@ -18,15 +18,19 @@ ALLOWED_FIELDS = {"description", "peopleCount", "specialNeeds", "locationDetails
 FORBIDDEN_FIELDS = {"incidentId", "status", "requestId"}
 
 
-def execute(request_id: str, body: dict, idempotency_key: str | None = None, expected_version: int | None = None) -> dict:
+def execute(
+    request_id: str, body: dict, idempotency_key: str | None = None, expected_version: int | None = None
+) -> dict:
+    idempotency_reservation: dict | None = None
     if idempotency_key:
-        replay = check_and_reserve(
+        idempotency_reservation = check_and_reserve(
             idempotency_key=idempotency_key,
             operation_name="PatchRescueRequest",
+            resource_scope=f"PATCH:/v1/rescue-requests/{request_id}",
             request_body=body,
         )
-        if replay and replay.get("replay"):
-            return json.loads(replay["body"])
+        if idempotency_reservation and idempotency_reservation.get("replay"):
+            return json.loads(idempotency_reservation["body"])
 
     forbidden_present = set(body.keys()) & FORBIDDEN_FIELDS
     if forbidden_present:
@@ -51,7 +55,13 @@ def execute(request_id: str, body: dict, idempotency_key: str | None = None, exp
         update_master_fields(request_id, updates, expected_version)
     except Exception as e:
         if idempotency_key:
-            finalize_failure(idempotency_key, "PATCH_FAILED", str(e))
+            finalize_failure(
+                idempotency_key=idempotency_key,
+                error_code="PATCH_FAILED",
+                error_message=str(e),
+                idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+                lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
+            )
         raise
 
     result = {"requestId": request_id, "updated": list(updates.keys())}
@@ -61,6 +71,8 @@ def execute(request_id: str, body: dict, idempotency_key: str | None = None, exp
             idempotency_key=idempotency_key,
             response_status_code=200,
             response_body=json.dumps(result),
+            idempotency_key_hash=idempotency_reservation.get("keyHash") if idempotency_reservation else None,
+            lock_owner=idempotency_reservation.get("lockOwner") if idempotency_reservation else None,
         )
 
     try:
