@@ -1152,7 +1152,6 @@ Required inbound fields:
 - `body.priorityScore`
 - `body.priorityLevel`
 - `body.evaluateReason`
-- `body.submittedAt`
 - `body.lastEvaluatedAt`
 - `body.description`
 - `body.location.latitude`
@@ -1164,6 +1163,7 @@ Validation rules:
 - `incidentId` and `evaluateId` must be valid UUIDs
 - `priorityScore` must be a decimal between `0` and `1`
 - `priorityLevel` must be one of `LOW`, `NORMAL`, `HIGH`, `CRITICAL`
+- `submittedAt`, when provided, must be an ISO-8601 datetime
 - `location` must be present with numeric `latitude` and `longitude`
 - `correlationId` must match `CURRENT_STATE.latestPrioritySourceEventId`
 

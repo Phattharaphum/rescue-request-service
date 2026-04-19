@@ -157,7 +157,7 @@ Inbound result messages must satisfy:
 - `body.priorityScore` is a decimal between `0` and `1`
 - `body.priorityLevel` is one of `LOW`, `NORMAL`, `HIGH`, `CRITICAL`
 - `body.evaluateReason` is present
-- `body.submittedAt` is ISO-8601
+- `body.submittedAt`, when present, is ISO-8601
 - `body.lastEvaluatedAt` is ISO-8601
 - `body.description` is present
 - `body.peopleCount` is a positive integer
@@ -325,3 +325,6 @@ aws secretsmanager create-secret `
 ```powershell
 sam local start-api --template-file template.local.yaml --docker-network rescue-net --env-vars .env.json
 ```
+
+`template.local.yaml` now includes SQS event mapping for `IngestPrioritizationEvaluationsFunction`
+to mirror deploy behavior, so queue-driven ingest wiring is aligned between local and deploy templates.

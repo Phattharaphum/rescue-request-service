@@ -154,7 +154,7 @@ function Ensure-IncidentCatalogTable {
   }
 
   Write-Host "Creating IncidentCatalogTable..."
-  $gsi = '[{"IndexName":"CatalogOrderIndex","KeySchema":[{"AttributeName":"catalogPartition","KeyType":"HASH"},{"AttributeName":"catalogSortKey","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]'
+  $gsi = 'IndexName=CatalogOrderIndex,KeySchema=[{AttributeName=catalogPartition,KeyType=HASH},{AttributeName=catalogSortKey,KeyType=RANGE}],Projection={ProjectionType=ALL}'
   $exitCode = Invoke-AwsCli -Quiet -Arguments @(
     "dynamodb", "create-table",
     "--table-name", "IncidentCatalogTable",

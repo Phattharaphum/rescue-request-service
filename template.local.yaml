@@ -377,6 +377,14 @@ Resources:
     Properties:
       Handler: src.handlers.internal.ingest_rescue_request_evaluations.handler
       CodeUri: .
+      Events:
+        PrioritizationEvaluatedQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   SyncIncidentCatalogFunction:
     Type: AWS::Serverless::Function

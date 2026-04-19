@@ -155,8 +155,8 @@ def _validate_message(header: dict[str, Any], body: dict[str, Any]) -> list[dict
     if not _is_positive_integer(body.get("peopleCount")):
         errors.append({"field": "body.peopleCount", "issue": "must be a positive integer"})
 
-    if not _is_iso_datetime(body.get("submittedAt")):
-        errors.append({"field": "body.submittedAt", "issue": "must be a valid ISO-8601 datetime"})
+    if "submittedAt" in body and not _is_iso_datetime(body.get("submittedAt")):
+        errors.append({"field": "body.submittedAt", "issue": "must be a valid ISO-8601 datetime when provided"})
 
     if not _is_iso_datetime(body.get("lastEvaluatedAt")):
         errors.append({"field": "body.lastEvaluatedAt", "issue": "must be a valid ISO-8601 datetime"})

@@ -112,11 +112,31 @@ def _build_evaluated_message(
     *,
     request_id: str,
     incident_id: str,
-    submitted_at: str,
+    submitted_at: str | None,
     correlation_id: str,
     message_type: str = "RescueRequestEvaluatedEvent",
     evaluate_id: str | None = None,
 ) -> dict:
+    body = {
+        "requestId": request_id,
+        "incidentId": incident_id,
+        "evaluateId": evaluate_id or str(uuid.uuid4()),
+        "requestType": "FLOOD",
+        "priorityScore": 0.91,
+        "priorityLevel": "CRITICAL",
+        "evaluateReason": "Children and bedridden residents need urgent rescue.",
+        "lastEvaluatedAt": "2026-04-18T00:04:30+00:00",
+        "description": "Need urgent evacuation",
+        "location": {
+            "latitude": 13.7563,
+            "longitude": 100.5018,
+        },
+        "peopleCount": 2,
+        "specialNeeds": ["bedridden", "children"],
+    }
+    if submitted_at is not None:
+        body["submittedAt"] = submitted_at
+
     return {
         "header": {
             "messageType": message_type,
@@ -125,24 +145,7 @@ def _build_evaluated_message(
             "sentAt": "2026-04-18T00:05:00+00:00",
             "version": "1",
         },
-        "body": {
-            "requestId": request_id,
-            "incidentId": incident_id,
-            "evaluateId": evaluate_id or str(uuid.uuid4()),
-            "requestType": "FLOOD",
-            "priorityScore": 0.91,
-            "priorityLevel": "CRITICAL",
-            "evaluateReason": "Children and bedridden residents need urgent rescue.",
-            "submittedAt": submitted_at,
-            "lastEvaluatedAt": "2026-04-18T00:04:30+00:00",
-            "description": "Need urgent evacuation",
-            "location": {
-                "latitude": 13.7563,
-                "longitude": 100.5018,
-            },
-            "peopleCount": 2,
-            "specialNeeds": ["bedridden", "children"],
-        },
+        "body": body,
     }
 
 
@@ -258,3 +261,25 @@ class TestPrioritizationIngestFlow:
         current = _get_public_current_state(request_id)
         assert current["status"] == "SUBMITTED"
         assert current.get("latestPriorityEvaluationId") is None
+
+    def test_accepts_event_without_submitted_at(self):
+        request_id, incident_id, _, _ = _create_request()
+        raw_current = get_current_state(request_id)
+        correlation_id = raw_current["latestPrioritySourceEventId"]
+
+        event = _build_sns_wrapped_sqs_event(
+            topic_arn="arn:aws:sns:ap-southeast-1:000000000000:rescue-prioritization-created-v1-local",
+            message=_build_evaluated_message(
+                request_id=request_id,
+                incident_id=incident_id,
+                submitted_at=None,
+                correlation_id=correlation_id,
+            ),
+        )
+
+        result = ingest_handler(event, None)
+
+        assert result == {"batchItemFailures": []}
+        current = _get_public_current_state(request_id)
+        assert current["status"] == "TRIAGED"
+        assert current["latestPriorityCorrelationId"] == correlation_id

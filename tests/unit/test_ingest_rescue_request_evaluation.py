@@ -126,6 +126,33 @@ def test_rejects_invalid_evaluated_event_payload(field, mutator):
     assert any(detail["field"] == field for detail in exc_info.value.details)
 
 
+def test_accepts_missing_submitted_at(monkeypatch):
+    updated_calls: dict = {}
+
+    monkeypatch.setattr(usecase, "check_and_reserve", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "get_current_state", lambda request_id: _current_state(request_id))
+    monkeypatch.setattr(
+        usecase,
+        "update_current_fields",
+        lambda request_id, updates, expected_version=None: updated_calls.update({
+            "request_id": request_id,
+            "updates": updates,
+        }),
+    )
+    monkeypatch.setattr(usecase, "finalize_success", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_failure", lambda **kwargs: None)
+
+    message = _message()
+    message["body"].pop("submittedAt", None)
+
+    result = usecase.execute(message)
+
+    assert result["status"] == "updated"
+    assert updated_calls["request_id"] == "req-1"
+    assert updated_calls["updates"]["priorityScore"] == 0.3
+    assert updated_calls["updates"]["priorityLevel"] == "NORMAL"
+
+
 def test_accepts_prioritization_service_message_shape(monkeypatch):
     updated_calls: dict = {}
 
