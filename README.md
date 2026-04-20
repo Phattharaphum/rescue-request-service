@@ -1367,6 +1367,9 @@ make test-integration
 ## API Endpoints
 
 ### Public
+- `GET /v1/health`
+- `GET /v1/health/live`
+- `GET /v1/health/ready`
 - `POST /v1/rescue-requests`
 - `POST /v1/citizen/tracking/lookup`
 - `GET /v1/citizen/rescue-requests/{requestId}/status`
@@ -1393,6 +1396,29 @@ make test-integration
 
 ### Internal
 - `GET /v1/internal/incidents/catalog`
+
+## Health Check Endpoints
+
+- `GET /v1/health/live`: liveness probe (process is alive, no dependency checks)
+- `GET /v1/health/ready`: readiness probe (checks DynamoDB dependencies)
+- `GET /v1/health`: combined liveness + readiness summary
+- Detailed reference: [docs/health-check.md](./docs/health-check.md)
+
+### bash
+
+```bash
+curl "http://127.0.0.1:3000/v1/health/live"
+curl "http://127.0.0.1:3000/v1/health/ready"
+curl "http://127.0.0.1:3000/v1/health"
+```
+
+### PowerShell
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:3000/v1/health/live" -Method Get
+Invoke-RestMethod -Uri "http://127.0.0.1:3000/v1/health/ready" -Method Get
+Invoke-RestMethod -Uri "http://127.0.0.1:3000/v1/health" -Method Get
+```
 
 ## Troubleshooting
 

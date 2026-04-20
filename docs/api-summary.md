@@ -14,6 +14,7 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
 4. [Error Responses](#4-error-responses)
 5. [Enumerations](#5-enumerations)
 6. [Public Endpoints (Citizens)](#6-public-endpoints-citizens)
+   - [GET /health, /health/live, /health/ready](#60-get-health-healthlive-healthready)
    - [POST /rescue-requests](#61-post-rescue-requests)
    - [POST /citizen/tracking/lookup](#62-post-citizentrackingLookup)
    - [GET /citizen/rescue-requests/{requestId}/status](#63-get-citizenrescue-requestsrequestidstatus)
@@ -163,6 +164,48 @@ All errors share the same JSON structure:
 ---
 
 ## 6. Public Endpoints (Citizens)
+
+### 6.0 GET /health, /health/live, /health/ready
+
+Health-check endpoints for infrastructure probes and monitoring.
+
+| Endpoint | Purpose | Dependencies | Success | Failure |
+|----------|---------|--------------|---------|---------|
+| `GET /health/live` | Liveness probe (process is up) | none | `200` | `500` |
+| `GET /health/ready` | Readiness probe (can serve traffic) | DynamoDB tables (`RescueRequestTable`, `IdempotencyTable`, `IncidentCatalogTable`) | `200` | `503` |
+| `GET /health` | Combined summary (liveness + readiness) | same as readiness | `200` | `503` |
+
+#### Example response (`GET /health`)
+
+```json
+{
+  "service": "rescue-request-service",
+  "stage": "dev",
+  "region": "ap-southeast-2",
+  "status": "pass",
+  "timestamp": "2026-04-20T10:10:00+00:00",
+  "checks": {
+    "liveness": {
+      "status": "pass",
+      "uptimeMs": 15342
+    },
+    "readiness": {
+      "status": "pass",
+      "latencyMs": 25,
+      "tables": [
+        {
+          "name": "rescueRequestTable",
+          "tableName": "RescueRequestTable-dev",
+          "status": "pass",
+          "tableStatus": "ACTIVE",
+          "latencyMs": 8,
+          "issue": null
+        }
+      ]
+    }
+  }
+}
+```
 
 ### 6.1 POST /rescue-requests
 
