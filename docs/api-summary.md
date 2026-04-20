@@ -37,11 +37,12 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
    - [POST /rescue-requests/{requestId}/resolve](#84-post-rescue-requestsrequestidresolve)
    - [POST /rescue-requests/{requestId}/cancel](#85-post-rescue-requestsrequestidcancel)
 9. [State Machine](#9-state-machine)
-10. [Async Integrations](#10-async-integrations)
-11. [Idempotency](#11-idempotency)
-12. [Duplicate Detection](#12-duplicate-detection)
-13. [Internal Endpoints](#13-internal-endpoints)
-   - [GET /internal/incidents/catalog](#131-get-internalincidentscatalog)
+10. [Async Contract](#10-async-contract)
+11. [Async Integrations](#11-async-integrations)
+12. [Idempotency](#12-idempotency)
+13. [Duplicate Detection](#13-duplicate-detection)
+14. [Internal Endpoints](#14-internal-endpoints)
+   - [GET /internal/incidents/catalog](#141-get-internalincidentscatalog)
 
 ---
 
@@ -50,8 +51,7 @@ A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml
 The Rescue Request Service provides a REST API for managing disaster rescue requests.
 It also exposes a local incident catalog for request creation. That catalog is refreshed
 asynchronously from IncidentTracking Service every 30 minutes, while the API itself reads
-from the service database snapshot. The incident catalog table is also bootstrapped with
-five hardmock rows (`IncidentA` through `IncidentE`) for internal testing and UI bootstrap.
+from the service database snapshot.
 
 | API Group | Audience | Auth Required |
 |-----------|----------|---------------|
@@ -229,7 +229,7 @@ the same incident, phone, request type, approximate location, and submission tim
 | Body | `incidentId` | string | **Yes** | Disaster incident identifier; must exist in `IncidentCatalogTable` (status is ignored) |
 | Body | `requestType` | RequestType | **Yes** | Type of emergency |
 | Body | `description` | string | **Yes** | Free-text situation description |
-| Body | `peopleCount` | integer ≥ 1 | **Yes** | Number of people who need help |
+| Body | `peopleCount` | integer = 1 | **Yes** | Number of people who need help |
 | Body | `latitude` | number [-90, 90] | **Yes** | GPS latitude |
 | Body | `longitude` | number [-180, 180] | **Yes** | GPS longitude |
 | Body | `contactName` | string | **Yes** | Primary contact's full name |
@@ -334,8 +334,8 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
   "incidentId": "INC-2024-001",
   "requestType": "FLOOD",
   "status": "ASSIGNED",
-  "statusMessage": "มีการมอบหมายหน่วยช่วยเหลือแล้ว กรุณาติดตามการอัปเดตล่าสุด",
-  "nextSuggestedAction": "เตรียมพร้อมรับการติดต่อจากหน่วยช่วยเหลือ",
+  "statusMessage": "?????????????????????????????? ??????????????????????????",
+  "nextSuggestedAction": "????????????????????????????????????????",
   "description": "Water level rising rapidly, 5 people trapped on second floor",
   "peopleCount": 5,
   "specialNeeds": "Elderly person, needs wheelchair",
@@ -507,7 +507,6 @@ Returns the locally stored incident catalog used by clients when selecting an in
 This endpoint reads from the service database, not from IncidentTracking Service inline.
 The catalog is refreshed asynchronously every 30 minutes, so temporary upstream sync
 failures do not block client reads.
-The table is also bootstrapped with five hardmock rows `IncidentA` through `IncidentE`.
 
 #### Query Parameters
 
@@ -989,7 +988,7 @@ defaults both values to `"staff"`.
 
 ### 8.1 POST /rescue-requests/{requestId}/triage
 
-`SUBMITTED → TRIAGED`
+`SUBMITTED ? TRIAGED`
 
 #### Request Body (optional)
 
@@ -1008,7 +1007,7 @@ defaults both values to `"staff"`.
 
 ### 8.2 POST /rescue-requests/{requestId}/assign
 
-`SUBMITTED → ASSIGNED` or `TRIAGED → ASSIGNED`
+`SUBMITTED ? ASSIGNED` or `TRIAGED ? ASSIGNED`
 
 **`responderUnitId` is required.**
 
@@ -1030,7 +1029,7 @@ defaults both values to `"staff"`.
 
 ### 8.3 POST /rescue-requests/{requestId}/start
 
-`ASSIGNED → IN_PROGRESS`
+`ASSIGNED ? IN_PROGRESS`
 
 #### Request Body (optional)
 
@@ -1042,7 +1041,7 @@ Same optional fields as [triage](#81-post-rescue-requestsrequestidtriage).
 
 ### 8.4 POST /rescue-requests/{requestId}/resolve
 
-`IN_PROGRESS → RESOLVED` *(terminal)*
+`IN_PROGRESS ? RESOLVED` *(terminal)*
 
 Publishes `rescue-request.status-changed` and `rescue-request.resolved` SNS events.
 
@@ -1056,7 +1055,7 @@ Same optional fields as [triage](#81-post-rescue-requestsrequestidtriage).
 
 ### 8.5 POST /rescue-requests/{requestId}/cancel
 
-`* → CANCELLED` *(terminal — from any non-terminal state)*
+`* ? CANCELLED` *(terminal — from any non-terminal state)*
 
 Publishes `rescue-request.status-changed` and `rescue-request.cancelled` SNS events.
 
@@ -1078,10 +1077,10 @@ Publishes `rescue-request.status-changed` and `rescue-request.cancelled` SNS eve
 ## 9. State Machine
 
 ```
-SUBMITTED ──/triage──▶ TRIAGED ──/assign──▶ ASSIGNED ──/start──▶ IN_PROGRESS ──/resolve──▶ RESOLVED
-    │                     │                     │                      │
-    ├──────/assign────────▶                     │                      │
-    └──────────────────────┴─────────────────────┴──────────────────────┴──/cancel──▶ CANCELLED
+SUBMITTED --/triage--? TRIAGED --/assign--? ASSIGNED --/start--? IN_PROGRESS --/resolve--? RESOLVED
+    ¦                     ¦                     ¦                      ¦
+    +------/assign--------?                     ¦                      ¦
+    +----------------------------------------------------------------------/cancel--? CANCELLED
 ```
 
 ### Allowed Transitions
@@ -1110,14 +1109,15 @@ Attempting to transition from a terminal state (`RESOLVED` or `CANCELLED`) also 
 
 ---
 
-## 10. Async Integrations
+## 10. Async Contract
 
-**Topic:** `rescue-request-events-v1-{stage}`
+This section defines the service-owned async contract published by Rescue Request Service.
 
-The internal `/stream` relay may normalize or repackage events for SSE delivery.
-That relay shape is internal-only and should not be treated as a public contract.
+Primary topic:
 
-Raw SNS messages are wrapped in the following envelope:
+- `rescue-request-events-v1-{stage}`
+
+### 10.1 Envelope Contract (All Outbound Messages)
 
 ```json
 {
@@ -1126,61 +1126,495 @@ Raw SNS messages are wrapped in the following envelope:
     "eventType": "rescue-request.status-changed",
     "schemaVersion": "1.0",
     "producer": "rescue-request-service",
-    "occurredAt": "2024-01-15T10:35:00.000000+00:00",
+    "occurredAt": "2026-04-20T15:30:00.000000+00:00",
     "traceId": "uuid",
     "correlationId": "uuid",
-    "partitionKey": "550e8400-e29b-41d4-a716-446655440000",
+    "partitionKey": "requestId",
     "contentType": "application/json"
   },
-  "body": { }
+  "body": {}
 }
 ```
 
-**SNS Message Attributes** (usable for subscription filters):
+Common header fields:
+
+| Header | Type | Description |
+|--------|------|-------------|
+| `header.messageId` | UUID | Unique event id |
+| `header.eventType` | string | Event name |
+| `header.schemaVersion` | string | Fixed `1.0` |
+| `header.producer` | string | Fixed `rescue-request-service` |
+| `header.occurredAt` | ISO-8601 datetime | Publish time |
+| `header.traceId` | UUID | Trace identifier |
+| `header.correlationId` | UUID/string | Correlation value for downstream flow |
+| `header.partitionKey` | string | Partition key (request id) |
+| `header.contentType` | string | Fixed `application/json` |
+
+SNS message attributes:
 
 | Attribute | Value |
 |-----------|-------|
-| `eventType` | e.g. `rescue-request.created` |
+| `eventType` | same as `header.eventType` |
 | `schemaVersion` | `1.0` |
 | `producer` | `rescue-request-service` |
 
-### Published Events
+### 10.2 Primary Message Set (5 Messages)
 
-| Event Type | Trigger | `body` Fields |
-|------------|---------|--------------|
-| `rescue-request.created` | New request created | `requestId`, `data` (current implementation publishes the full persisted master item, including internal storage fields) |
-| `rescue-request.status-changed` | Any state transition | `requestId`, `previousStatus`, `newStatus`, `eventId`, `version` |
-| `rescue-request.citizen-updated` | Citizen submits an update, or staff PATCH edits the master record | Citizen update: `requestId`, `updateId`, `updateType`, `updatePayload`, `createdAt`; PATCH: `requestId`, `updateId="patch"`, `updateType="PATCH"`, `updatePayload` |
-| `rescue-request.priority-score-updated` | Staff priority sync API updates `priorityScore` | `requestId`, `previousPriorityScore`, `newPriorityScore`, optional `priorityLevel`, optional `note`, optional `updatedAt` |
-| `rescue-request.resolved` | Request resolved | `requestId`, `eventId` |
-| `rescue-request.cancelled` | Request cancelled | `requestId`, `eventId`, `reason` |
+#### Message #1 - `rescue-request.created`
 
-> **Note:** Event publishing is non-blocking — a failure to publish does **not** cause the
-> HTTP request to fail.
+| Item | Value |
+|------|-------|
+| Style | Event (Pub/Sub) |
+| Producer | Rescue Request Service |
+| Main Consumer | Rescue Request Prioritization Service |
+| Trigger | `POST /rescue-requests` success |
+| Correlation | Explicitly set to `requestId` |
 
-### Prioritization Result Ingest
+Body contract:
 
-This service does not publish outbound prioritization commands or re-evaluation topics.
-Instead, it consumes evaluated results from Rescue Prioritization Service through one shared SQS queue:
+| Field | Type | Description |
+|-------|------|-------------|
+| `requestId` | UUID | Request id |
+| `data` | object | Full persisted master request snapshot at creation time (includes service-internal storage fields) |
+
+Message body example:
+
+```json
+{
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "data": {
+    "PK": "REQ#0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+    "SK": "META",
+    "itemType": "MASTER",
+    "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+    "incidentId": "f3e1c8b2-6a1d-4c22-a9f3-5f8b7a1d2e10",
+    "requestType": "FLOOD",
+    "description": "ระดับน้ำเพิ่มสูงอย่างรวดเร็ว",
+    "peopleCount": 2,
+    "latitude": 13.7563,
+    "longitude": 100.5018,
+    "contactName": "สมชาย ใจดี",
+    "contactPhone": "0812345678",
+    "sourceChannel": "MOBILE",
+    "submittedAt": "2026-04-20T16:05:10.111222+00:00"
+  }
+}
+```
+
+Published header example:
+
+```json
+{
+  "messageId": "2df36ac2-93eb-4f6f-bf8d-5bb46bf6fb75",
+  "eventType": "rescue-request.created",
+  "schemaVersion": "1.0",
+  "producer": "rescue-request-service",
+  "occurredAt": "2026-04-20T16:05:12.451289+00:00",
+  "traceId": "3b7fa0cb-c27c-42c7-af4a-6f4fae87bd41",
+  "correlationId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "partitionKey": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "contentType": "application/json"
+}
+```
+
+Published header fields:
+
+| Header | Value / Rule |
+|--------|--------------|
+| `messageId` | UUID generated by service |
+| `eventType` | fixed `rescue-request.created` |
+| `schemaVersion` | fixed `1.0` |
+| `producer` | fixed `rescue-request-service` |
+| `occurredAt` | publish timestamp (ISO-8601) |
+| `traceId` | UUID generated by service unless explicitly supplied |
+| `correlationId` | set to `requestId` in create flow |
+| `partitionKey` | `requestId` |
+| `contentType` | fixed `application/json` |
+
+#### Message #2 - `rescue-request.citizen-updated`
+
+| Item | Value |
+|------|-------|
+| Style | Event (Pub/Sub) |
+| Producer | Rescue Request Service |
+| Main Consumer | Rescue Request Prioritization Service |
+| Trigger | `POST /citizen/rescue-requests/{requestId}/updates` and `PATCH /rescue-requests/{requestId}` |
+| Correlation | Auto-generated UUID when not explicitly supplied |
+
+Body contract:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requestId` | UUID | Request id |
+| `updateId` | string | Update identifier (`patch` for staff patch flow) |
+| `updateType` | string | Citizen flow: one of update types; patch flow: `PATCH` |
+| `updatePayload` | object | Changed payload (present in both citizen update and patch publisher paths) |
+| `createdAt` | ISO-8601 datetime | Present in citizen update flow |
+
+Message body example:
+
+```json
+{
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "updateId": "30c71f17-4f72-4bb6-b6c2-8f6e12f8f3d2",
+  "updateType": "PEOPLE_COUNT",
+  "updatePayload": {
+    "peopleCount": 5
+  },
+  "createdAt": "2026-04-20T16:08:00.000000+00:00"
+}
+```
+
+Published header example:
+
+```json
+{
+  "messageId": "8f3a6771-16f2-4f7a-9f6a-90e36dd0db5c",
+  "eventType": "rescue-request.citizen-updated",
+  "schemaVersion": "1.0",
+  "producer": "rescue-request-service",
+  "occurredAt": "2026-04-20T16:08:01.133052+00:00",
+  "traceId": "25a36dc1-916f-4c69-8b9d-c8b6fa84c3ef",
+  "correlationId": "7ccfe913-0ec9-45eb-aeef-64380d62f2de",
+  "partitionKey": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "contentType": "application/json"
+}
+```
+
+Published header fields:
+
+| Header | Value / Rule |
+|--------|--------------|
+| `messageId` | UUID generated by service |
+| `eventType` | fixed `rescue-request.citizen-updated` |
+| `schemaVersion` | fixed `1.0` |
+| `producer` | fixed `rescue-request-service` |
+| `occurredAt` | publish timestamp (ISO-8601) |
+| `traceId` | UUID generated by service unless explicitly supplied |
+| `correlationId` | auto-generated UUID when not supplied |
+| `partitionKey` | `requestId` |
+| `contentType` | fixed `application/json` |
+
+#### Message #3 - `rescue-request.status-changed`
+
+| Item | Value |
+|------|-------|
+| Style | Event (Pub/Sub) |
+| Producer | Rescue Request Service |
+| Main Consumer | Stream consumers, dashboards, automation |
+| Trigger | Any successful state transition (commands, append-event flow, prioritization ingest flow) |
+| Correlation | Depends on source flow (command default auto UUID, append-event may use requestId, prioritization ingest forwards inbound correlation) |
+
+Body contract:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requestId` | UUID | Request id |
+| `previousStatus` | enum | Previous status |
+| `newStatus` | enum | New status |
+| `eventId` | UUID | Status event id |
+| `version` | integer | New `stateVersion` |
+
+Message body example:
+
+```json
+{
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "previousStatus": "SUBMITTED",
+  "newStatus": "TRIAGED",
+  "eventId": "95f49f58-c495-4e87-bd74-8dae36f65f9e",
+  "version": 2
+}
+```
+
+Published header example:
+
+```json
+{
+  "messageId": "f6cc2ad2-570b-49a2-87b4-a1009fd5f7cf",
+  "eventType": "rescue-request.status-changed",
+  "schemaVersion": "1.0",
+  "producer": "rescue-request-service",
+  "occurredAt": "2026-04-20T16:10:15.557404+00:00",
+  "traceId": "6a7f85cc-d2d0-4487-8ab5-7f8cc85e08bb",
+  "correlationId": "d0b1c2d3-e4f5-6789-a0b1-c2d3e4f56789",
+  "partitionKey": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "contentType": "application/json"
+}
+```
+
+Published header fields:
+
+| Header | Value / Rule |
+|--------|--------------|
+| `messageId` | UUID generated by service |
+| `eventType` | fixed `rescue-request.status-changed` |
+| `schemaVersion` | fixed `1.0` |
+| `producer` | fixed `rescue-request-service` |
+| `occurredAt` | publish timestamp (ISO-8601) |
+| `traceId` | UUID generated by service unless explicitly supplied |
+| `correlationId` | source dependent: auto UUID, `requestId`, or forwarded inbound correlation (prioritization ingest) |
+| `partitionKey` | `requestId` |
+| `contentType` | fixed `application/json` |
+
+#### Message #4 - `rescue-request.resolved`
+
+| Item | Value |
+|------|-------|
+| Style | Event (Pub/Sub) |
+| Producer | Rescue Request Service |
+| Main Consumer | Stream consumers, closure automation |
+| Trigger | Transition to `RESOLVED` (published in addition to `rescue-request.status-changed`) |
+
+Body contract:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requestId` | UUID | Request id |
+| `eventId` | UUID | Closure event id |
+
+Message body example:
+
+```json
+{
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "eventId": "db1f16c5-d01d-43b8-8ca6-2bcbf9147633"
+}
+```
+
+Published header example:
+
+```json
+{
+  "messageId": "6f6b6052-c650-426f-a126-68f7b6210e79",
+  "eventType": "rescue-request.resolved",
+  "schemaVersion": "1.0",
+  "producer": "rescue-request-service",
+  "occurredAt": "2026-04-20T16:13:42.011927+00:00",
+  "traceId": "bc37f2f4-6f08-45c8-8b3f-29d7d1ad0f6f",
+  "correlationId": "f640a544-cf83-4b61-9b8b-8a8026689792",
+  "partitionKey": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "contentType": "application/json"
+}
+```
+
+Published header fields:
+
+| Header | Value / Rule |
+|--------|--------------|
+| `messageId` | UUID generated by service |
+| `eventType` | fixed `rescue-request.resolved` |
+| `schemaVersion` | fixed `1.0` |
+| `producer` | fixed `rescue-request-service` |
+| `occurredAt` | publish timestamp (ISO-8601) |
+| `traceId` | UUID generated by service unless explicitly supplied |
+| `correlationId` | auto-generated UUID when not supplied |
+| `partitionKey` | `requestId` |
+| `contentType` | fixed `application/json` |
+
+#### Message #5 - `rescue-request.cancelled`
+
+| Item | Value |
+|------|-------|
+| Style | Event (Pub/Sub) |
+| Producer | Rescue Request Service |
+| Main Consumer | Stream consumers, closure automation |
+| Trigger | Transition to `CANCELLED` (published in addition to `rescue-request.status-changed`) |
+
+Body contract:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requestId` | UUID | Request id |
+| `eventId` | UUID | Cancellation event id |
+| `reason` | string | Cancellation reason (can be empty string if not provided by caller) |
+
+Message body example:
+
+```json
+{
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "eventId": "4a3e4c72-8f76-4cea-a30e-1bf2a0d7e4af",
+  "reason": "Duplicate submission confirmed by operator"
+}
+```
+
+Published header example:
+
+```json
+{
+  "messageId": "3bb3b113-76d1-4139-9e6c-86c05f9aa6ce",
+  "eventType": "rescue-request.cancelled",
+  "schemaVersion": "1.0",
+  "producer": "rescue-request-service",
+  "occurredAt": "2026-04-20T16:15:18.771211+00:00",
+  "traceId": "8f442823-dcd0-4a64-96a9-11b66f2d4984",
+  "correlationId": "6169fde9-d4fb-4d6a-ab0e-3cb7db663d90",
+  "partitionKey": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "contentType": "application/json"
+}
+```
+
+Published header fields:
+
+| Header | Value / Rule |
+|--------|--------------|
+| `messageId` | UUID generated by service |
+| `eventType` | fixed `rescue-request.cancelled` |
+| `schemaVersion` | fixed `1.0` |
+| `producer` | fixed `rescue-request-service` |
+| `occurredAt` | publish timestamp (ISO-8601) |
+| `traceId` | UUID generated by service unless explicitly supplied |
+| `correlationId` | auto-generated UUID when not supplied |
+| `partitionKey` | `requestId` |
+| `contentType` | fixed `application/json` |
+
+### 10.3 Additional Outbound Event (Operational)
+
+#### Message #6 - `rescue-request.priority-score-updated`
+
+| Item | Value |
+|------|-------|
+| Style | Event (Pub/Sub) |
+| Producer | Rescue Request Service |
+| Main Consumer | Stream consumers, analytics, monitoring |
+| Trigger | `PATCH /rescue-requests/{requestId}/priority` when `priorityScore` actually changes |
+| Correlation | Explicitly set to `requestId` in this flow |
+
+Body contract:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requestId` | UUID | Request id |
+| `previousPriorityScore` | number \| null | Score before update |
+| `newPriorityScore` | number \| null | Score after update |
+| `priorityLevel` | string | Priority level after update |
+| `note` | string | Staff note |
+| `updatedAt` | ISO-8601 datetime | Update timestamp |
+
+Message body example:
+
+```json
+{
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "previousPriorityScore": 0.6,
+  "newPriorityScore": 0.9,
+  "priorityLevel": "CRITICAL",
+  "note": "Escalated after manual validation",
+  "updatedAt": "2026-04-20T16:17:19.000000+00:00"
+}
+```
+
+Published header example:
+
+```json
+{
+  "messageId": "7a4fce95-4960-44f0-b2b6-790c0fd08957",
+  "eventType": "rescue-request.priority-score-updated",
+  "schemaVersion": "1.0",
+  "producer": "rescue-request-service",
+  "occurredAt": "2026-04-20T16:17:20.782000+00:00",
+  "traceId": "fcfc3c44-6898-4c1a-8784-66effd8e9599",
+  "correlationId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "partitionKey": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "contentType": "application/json"
+}
+```
+
+Published header fields:
+
+| Header | Value / Rule |
+|--------|--------------|
+| `messageId` | UUID generated by service |
+| `eventType` | fixed `rescue-request.priority-score-updated` |
+| `schemaVersion` | fixed `1.0` |
+| `producer` | fixed `rescue-request-service` |
+| `occurredAt` | publish timestamp (ISO-8601) |
+| `traceId` | UUID generated by service unless explicitly supplied |
+| `correlationId` | set to `requestId` in priority update flow |
+| `partitionKey` | `requestId` |
+| `contentType` | fixed `application/json` |
+
+---
+
+## 11. Async Integrations
+
+### 11.1 Prioritization Result Ingest
+
+This service consumes evaluated prioritization results from Rescue Request Prioritization Service.
+
+Queue topology:
 
 - queue: `rescue-prioritization-evaluated-{stage}`
 - DLQ: `rescue-prioritization-evaluated-dlq-{stage}`
 
-The shared queue can subscribe to two external SNS topics:
+External topics that can fan in to the shared queue:
 
 - `rescue.prioritization.created.v1`
 - `rescue.prioritization.updated.v1`
+- `rescue.prioritization.events.v1` (consolidated topic)
 
-Optional stack parameters:
+Optional stack parameters for auto-subscription:
 
 - `PrioritizationCreatedTopicArn`
 - `PrioritizationUpdatedTopicArn`
 
-If either topic ARN is supplied, the stack creates the SNS-to-SQS subscription automatically.
+Inbound `messageType` compatibility:
 
-Canonical inbound `messageType` on both result topics is `RescueRequestEvaluatedEvent`.
-For transition compatibility, `RescueRequestReEvaluateEvent` is also accepted on
-`rescue.prioritization.updated.v1` only.
+- `RescueRequestEvaluatedEvent` (canonical)
+- `RescueRequestEvaluateEvent` (compatibility alias, normalized to canonical)
+- `RescueRequestReEvaluateEvent` (accepted on updated/consolidated result channels)
+
+#### Example Integration Reference - Message #3 Rescue Request Update Flow
+
+Reference use case: citizen/staff update triggers re-evaluation in Prioritization Service.
+
+| Item | Value |
+|------|-------|
+| Source Message Name | `rescue-request.citizen-updated` |
+| Source Producer | Rescue Request Service |
+| Source Consumer | Rescue Request Prioritization Service |
+| Result Channel | `rescue.prioritization.updated.v1` |
+| Result `messageType` | `RescueRequestReEvaluateEvent` |
+| Description | ????? request ??? update (????????????????????????????????? location ???????) Prioritization Service ??????????????????????? service ??? ingest |
+
+Result message headers:
+
+| Header | Description |
+|--------|-------------|
+| `messageType` | `RescueRequestEvaluatedEvent` / `RescueRequestEvaluateEvent` / `RescueRequestReEvaluateEvent` |
+| `correlationId` | Must match `CURRENT_STATE.latestPrioritySourceEventId` |
+| `sentAt` | ISO-8601 datetime |
+| `version` | `1` |
+
+Result body example:
+
+```json
+{
+  "requestId": "REQ-8812-8888",
+  "incidentId": "8b9b6d5b-7d5e-4d0b-a7e2-2a0a6bd5c111",
+  "evaluateId": "812748a6-5a3a-43c5-8b4f-140034ece737",
+  "requestType": "flood_rescue",
+  "priorityScore": 0.3,
+  "priorityLevel": "NORMAL",
+  "evaluateReason": "Lack of food reserves indicates a potential need for assistance, but no immediate life-threatening situation is apparent. Location is accessible.",
+  "lastEvaluatedAt": "2026-03-22T07:58:10.247935+00:00",
+  "description": "????????????????",
+  "location": {
+    "latitude": 11.111,
+    "longitude": 22.222,
+    "province": "test province",
+    "district": "test dist",
+    "subdistrict": "test subdist",
+    "addressLine": "test address"
+  },
+  "peopleCount": 1,
+  "specialNeeds": [
+    "bedridden",
+    "children"
+  ]
+}
+```
 
 Required inbound fields:
 
@@ -1204,48 +1638,43 @@ Required inbound fields:
 Validation rules:
 
 - `incidentId` and `evaluateId` must be valid UUIDs
-- `priorityScore` must be a decimal between `0` and `1`
+- `priorityScore` must be between `0` and `1`
 - `priorityLevel` must be one of `LOW`, `NORMAL`, `HIGH`, `CRITICAL`
-- `submittedAt`, when provided, must be an ISO-8601 datetime
-- `location` must be present with numeric `latitude` and `longitude`
-- `correlationId` must match `CURRENT_STATE.latestPrioritySourceEventId`
+- `submittedAt`, when present, must be ISO-8601 datetime
+- `location` must exist with numeric `latitude` and `longitude`
+- `correlationId` must match latest service-owned priority source event id
 
-That correlation target comes from the latest service-owned source event published on
-`rescue-request-events-v1-{stage}`:
+Accepted result behavior:
 
-- `rescue-request.created`
-- `rescue-request.citizen-updated`
+- appends `EVENT#{stateVersion}`
+- bumps `stateVersion`
+- updates priority fields in `CURRENT`
+- publishes `rescue-request.status-changed`
+- skips terminal requests
+- applies idempotency key `RescueRequestEvaluatedEvent#{evaluateId}`
 
-When an evaluated message is accepted, the request `currentState` is updated with:
+### 11.2 Incident Catalog Sync
 
-- `priorityScore`
-- `priorityLevel`
-- `status` (`SUBMITTED` requests move to `TRIAGED`; later non-terminal states are preserved)
-- `latestPriorityEvaluationId`
-- `latestPriorityReason`
-- `latestPriorityEvaluatedAt`
-- `latestPriorityCorrelationId`
-- `lastPriorityIngestedAt`
+Incident data is synchronized from IncidentTracking Service into local `IncidentCatalogTable-{stage}`.
 
-Terminal requests are acknowledged and skipped. Result idempotency is keyed by `evaluateId`.
+| Item | Value |
+|------|-------|
+| Trigger | EventBridge schedule `rate(30 minutes)` |
+| Lambda timeout | 30 seconds |
+| External HTTP timeout | 30 seconds |
+| Secret source | AWS Secrets Manager `rescue-request-service/incident-tracking/{stage}` |
+| Required secret keys | `apiUrl`, `apiKey` |
+| Optional secret keys | `accept`, `transactionIdHeader` |
 
-### Incident Catalog Sync
+Client read behavior:
 
-Incident data is synced from IncidentTracking Service into a dedicated local table:
-
-- Trigger: Amazon EventBridge schedule every 30 minutes
-- Lambda timeout: 30 seconds
-- External HTTP timeout: 30 seconds
-- Secret source: AWS Secrets Manager secret `rescue-request-service/incident-tracking/{stage}`
-- Required secret keys: `apiUrl`, `apiKey`
-- Optional secret keys: `accept`, `transactionIdHeader`
-
-`GET /incidents` reads only from the local table, so client reads remain available even if
-the upstream sync fails or times out.
+- `GET /incidents` reads from local table only
+- `GET /internal/incidents/catalog` reads from local table only
+- upstream sync failure does not block read availability
 
 ---
 
-## 11. Idempotency
+## 12. Idempotency
 
 ### Usage
 
@@ -1289,7 +1718,7 @@ X-Idempotency-Key: f47ac10b-58cc-4372-a567-0e02b2c3d479
 
 ---
 
-## 12. Duplicate Detection
+## 13. Duplicate Detection
 
 When a request is submitted **without** an idempotency key, the service checks for a
 recent duplicate using a content-based signature:
@@ -1311,15 +1740,14 @@ existing request.
 
 ---
 
-## 13. Internal Endpoints
+## 14. Internal Endpoints
 
-### 13.1 GET /internal/incidents/catalog
+### 14.1 GET /internal/incidents/catalog
 
 Returns every row currently stored in `IncidentCatalogTable` for internal tooling/support use.
 
 This endpoint returns the service's narrow internal shape and includes both:
-- the five hardmock seed rows (`IncidentA` through `IncidentE`)
-- any additional incidents synced from IncidentTracking Service
+- incidents currently stored in `IncidentCatalogTable` from sync operations
 
 #### Response `200 OK`
 
@@ -1327,16 +1755,16 @@ This endpoint returns the service's narrow internal shape and includes both:
 {
   "items": [
     {
-      "incident_id": "MOCK-INC-001",
+      "incident_id": "019C774D-1AC5-758B-AE95-5CD4AEB89258",
       "incident_type": "flood",
       "incident_name": "IncidentA",
       "status": "REPORTED",
-      "incident_description": "Mock flood incident for internal testing and UI bootstrap"
+      "incident_description": "Flooding reported near main road and residential alley"
     },
     {
-      "incident_id": "019C774D-1AC5-758B-AE95-5CD4AEB89258",
+      "incident_id": "5c6f3f4d-2c67-4c78-9caa-4df94cbf6ec1",
       "incident_type": "fire",
-      "incident_name": "IncidentF",
+      "incident_name": "IncidentB",
       "status": "REPORTED",
       "incident_description": "Fire reported near TU Dome (Verified)"
     }
@@ -1353,3 +1781,4 @@ This endpoint returns the service's narrow internal shape and includes both:
 | `incident_description` | string \| null | Description stored in the table |
 
 **Error responses:** `500`
+

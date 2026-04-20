@@ -55,19 +55,45 @@ def _load_incident_tracking_secret() -> dict:
 
 def fetch_incidents() -> list[dict]:
     secret = _load_incident_tracking_secret()
+    transaction_id = str(uuid.uuid4())
     request = Request(
         url=secret["apiUrl"],
         headers={
             "Accept": secret["accept"],
             "api-key": secret["apiKey"],
-            secret["transactionIdHeader"]: str(uuid.uuid4()),
+            secret["transactionIdHeader"]: transaction_id,
         },
         method="GET",
     )
 
+    logger.info(
+        "Calling IncidentTracking Service",
+        extra={
+            "extra_data": {
+                "url": secret["apiUrl"],
+                "method": "GET",
+                "timeoutSeconds": INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS,
+                "accept": secret["accept"],
+                "transactionIdHeader": secret["transactionIdHeader"],
+                "transactionId": transaction_id,
+            }
+        },
+    )
+
     try:
         with urlopen(request, timeout=INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            raw_payload = response.read()
+            payload = json.loads(raw_payload.decode("utf-8"))
+            logger.info(
+                "IncidentTracking Service call completed",
+                extra={
+                    "extra_data": {
+                        "statusCode": getattr(response, "status", None) or response.getcode(),
+                        "responseBytes": len(raw_payload),
+                        "responseType": type(payload).__name__,
+                    }
+                },
+            )
     except HTTPError as exc:
         logger.exception("IncidentTracking Service returned HTTP %s", exc.code)
         raise ServiceUnavailableError("IncidentTracking Service request failed") from exc
@@ -87,4 +113,13 @@ def fetch_incidents() -> list[dict]:
     incidents = [item for item in payload if isinstance(item, dict)]
     if len(incidents) != len(payload):
         logger.warning("IncidentTracking Service response contained non-object entries; ignoring invalid rows")
+    logger.info(
+        "IncidentTracking Service incidents parsed",
+        extra={
+            "extra_data": {
+                "incidentCount": len(incidents),
+                "droppedNonObjectRows": len(payload) - len(incidents),
+            }
+        },
+    )
     return incidents

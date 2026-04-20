@@ -265,8 +265,6 @@ Upstream does not provide `incident_name`, so this service generates stable runn
 - `IncidentC`
 - ...
 
-Five hardmock rows are also seeded into the table for internal/testing bootstrap.
-
 ### Read Path
 
 `GET /v1/incidents` reads from `IncidentCatalogTable` only.

@@ -289,13 +289,6 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentCatalogTable
-        - Version: "2012-10-17"
-          Statement:
-            - Sid: AllowIncidentCatalogSeedPutItem
-              Effect: Allow
-              Action:
-                - dynamodb:PutItem
-              Resource: !GetAtt IncidentCatalogTable.Arn
       Events:
         Api:
           Type: Api
@@ -312,13 +305,6 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentCatalogTable
-        - Version: "2012-10-17"
-          Statement:
-            - Sid: AllowIncidentCatalogSeedPutItem
-              Effect: Allow
-              Action:
-                - dynamodb:PutItem
-              Resource: !GetAtt IncidentCatalogTable.Arn
       Events:
         Api:
           Type: Api

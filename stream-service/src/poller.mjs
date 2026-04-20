@@ -18,6 +18,17 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), 
   marshallOptions: { removeUndefinedValues: true }
 });
 
+function logEvent(level, message, extra = {}) {
+  const logger = console[level] || console.log;
+  logger(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: level.toUpperCase(),
+    logger: "stream-service.poller",
+    message,
+    ...extra
+  }));
+}
+
 function padTimestamp(input) {
   return String(input).padStart(13, "0");
 }
@@ -146,11 +157,23 @@ async function persistEvent(event) {
 
 async function processMessage(message) {
   const event = normalizeEvent(message.Body);
+  logEvent("info", "Stream poller received SQS message", {
+    sqsMessageId: message.MessageId,
+    bodyBytes: typeof message.Body === "string" ? Buffer.byteLength(message.Body, "utf8") : 0,
+    eventType: event.metadata?.eventType,
+    eventId: event.metadata?.eventId,
+    partitionKey: event.metadata?.partitionKey
+  });
   await persistEvent(event);
   await sqs.send(new DeleteMessageCommand({
     QueueUrl: QUEUE_URL,
     ReceiptHandle: message.ReceiptHandle
   }));
+  logEvent("info", "Stream poller persisted and deleted SQS message", {
+    sqsMessageId: message.MessageId,
+    eventType: event.metadata?.eventType,
+    eventId: event.metadata?.eventId
+  });
 }
 
 export const handler = async (_event, context) => {
@@ -161,8 +184,17 @@ export const handler = async (_event, context) => {
   const startedAt = Date.now();
   const ownerId = context.awsRequestId || crypto.randomUUID();
   let processed = 0;
+  logEvent("info", "Stream poller invocation started", {
+    awsRequestId: context.awsRequestId,
+    queueUrl: QUEUE_URL,
+    streamTableName: STREAM_TABLE_NAME
+  });
 
   if (!await acquireLease(ownerId)) {
+    logEvent("info", "Stream poller skipped due to lease-unavailable", {
+      awsRequestId: context.awsRequestId,
+      ownerId
+    });
     return {
       processed,
       skipped: true,
@@ -184,6 +216,10 @@ export const handler = async (_event, context) => {
       if (messages.length === 0) {
         continue;
       }
+      logEvent("info", "Stream poller receive-message batch", {
+        awsRequestId: context.awsRequestId,
+        batchSize: messages.length
+      });
 
       for (const message of messages) {
         await processMessage(message);
@@ -196,8 +232,17 @@ export const handler = async (_event, context) => {
     }
   } finally {
     await releaseLease(ownerId);
+    logEvent("info", "Stream poller lease released", {
+      awsRequestId: context.awsRequestId,
+      ownerId
+    });
   }
 
+  logEvent("info", "Stream poller invocation completed", {
+    awsRequestId: context.awsRequestId,
+    processed,
+    elapsedMs: Date.now() - startedAt
+  });
   return {
     processed,
     elapsedMs: Date.now() - startedAt

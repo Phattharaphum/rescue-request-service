@@ -68,3 +68,33 @@ def test_parses_sns_wrapped_updated_topic_and_infers_legacy_channel():
     assert parsed["header"]["channel"] == "rescue.prioritization.updated.v1"
     assert parsed["header"]["messageType"] == "RescueRequestReEvaluateEvent"
     assert parsed["body"]["requestId"] == "req-2"
+
+
+def test_parses_sns_wrapped_consolidated_topic_and_infers_events_channel():
+    record = {
+        "messageId": "sqs-record-3",
+        "body": json.dumps({
+            "Type": "Notification",
+            "MessageId": "sns-message-3",
+            "TopicArn": "arn:aws:sns:us-east-1:955468203539:rescue-prioritization-events-v1",
+            "Timestamp": "2026-04-20T15:23:07.006Z",
+            "MessageAttributes": {},
+            "Message": json.dumps({
+                "header": {
+                    "messageType": "RescueRequestReEvaluateEvent",
+                    "correlationId": "corr-3",
+                    "sentAt": "2026-04-20T15:23:06.967396+00:00",
+                    "version": 1,
+                },
+                "body": {"requestId": "req-3"},
+            }),
+        }),
+        "messageAttributes": {},
+    }
+
+    parsed = parse_prioritization_record(record)
+
+    assert parsed["header"]["channel"] == "rescue.prioritization.events.v1"
+    assert parsed["header"]["messageType"] == "RescueRequestReEvaluateEvent"
+    assert parsed["header"]["topicArn"].endswith("rescue-prioritization-events-v1")
+    assert parsed["body"]["requestId"] == "req-3"
