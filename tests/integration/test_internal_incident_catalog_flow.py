@@ -67,7 +67,13 @@ def test_internal_incident_catalog_returns_seeded_rows_with_internal_shape():
 
     items = result["items"]
     mock_ids = {item["incident_id"] for item in items}
-    assert {"MOCK-INC-001", "MOCK-INC-002", "MOCK-INC-003", "MOCK-INC-004", "MOCK-INC-005"}.issubset(mock_ids)
+    assert {
+        "f3e1c8b2-6a1d-4c22-a9f3-5f8b7a1d2e10",
+        "9a0d7b34-2f6e-4b87-8d1a-3c7f5e2a9b44",
+        "2c4f9e71-8b55-4d6a-b3a1-1e7f0c4d8a22",
+        "7d2a1b5c-3e44-45f8-9c12-6b0e3f9d7a61",
+        "c1b8e3d4-5f92-4a7c-8d6e-2f0a9b3c7d58",
+    }.issubset(mock_ids)
     assert all(
         set(item.keys()) == {"incident_id", "incident_type", "incident_name", "status", "incident_description"}
         for item in items

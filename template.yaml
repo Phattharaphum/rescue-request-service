@@ -269,6 +269,8 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentCatalogTable
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
@@ -287,6 +289,13 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentCatalogTable
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: AllowIncidentCatalogSeedPutItem
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt IncidentCatalogTable.Arn
       Events:
         Api:
           Type: Api
@@ -303,6 +312,13 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentCatalogTable
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: AllowIncidentCatalogSeedPutItem
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt IncidentCatalogTable.Arn
       Events:
         Api:
           Type: Api
@@ -631,6 +647,8 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         PrioritizationEvaluatedQueue:
           Type: SQS
