@@ -2,6 +2,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+from src.adapters.persistence.incident_catalog_repository import get_incident
 from src.adapters.persistence.rescue_request_repository import (
     create_rescue_request,
     find_by_phone_hash,
@@ -65,6 +66,13 @@ def execute(
         )
         if idempotency_reservation and idempotency_reservation.get("replay"):
             return json.loads(idempotency_reservation["body"])
+
+    incident = get_incident(body["incidentId"])
+    if not incident:
+        raise ValidationError(
+            "Input validation failed",
+            [{"field": "incidentId", "issue": "must reference an existing incident in IncidentCatalogTable"}],
+        )
 
     normalized_phone = normalize_phone(body["contactPhone"])
     phone_hash = hash_phone(normalized_phone)

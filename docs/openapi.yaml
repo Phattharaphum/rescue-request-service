@@ -1376,7 +1376,7 @@ components:
       properties:
         incidentId:
           type: string
-          description: Identifier of the disaster incident this request belongs to
+          description: Identifier of the disaster incident this request belongs to; must exist in `IncidentCatalogTable` (status is not checked)
           example: "INC-2024-001"
         requestType:
           $ref: '#/components/schemas/RequestType'

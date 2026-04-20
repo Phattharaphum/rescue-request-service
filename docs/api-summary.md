@@ -183,7 +183,7 @@ the same incident, phone, request type, approximate location, and submission tim
 | Location | Field | Type | Required | Description |
 |----------|-------|------|----------|-------------|
 | Header | `X-Idempotency-Key` | UUID | No | Idempotency key |
-| Body | `incidentId` | string | **Yes** | Disaster incident identifier |
+| Body | `incidentId` | string | **Yes** | Disaster incident identifier; must exist in `IncidentCatalogTable` (status is ignored) |
 | Body | `requestType` | RequestType | **Yes** | Type of emergency |
 | Body | `description` | string | **Yes** | Free-text situation description |
 | Body | `peopleCount` | integer ≥ 1 | **Yes** | Number of people who need help |

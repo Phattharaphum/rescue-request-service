@@ -10,6 +10,7 @@ os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:4566"
 os.environ["AWS_REGION"] = "ap-southeast-1"
 os.environ["DYNAMODB_TABLE_NAME"] = "RescueRequestTable"
 os.environ["IDEMPOTENCY_TABLE_NAME"] = "IdempotencyTable"
+os.environ["INCIDENT_CATALOG_TABLE_NAME"] = "IncidentCatalogTable"
 os.environ["SNS_TOPIC_ARN"] = ""
 os.environ["AWS_ACCESS_KEY_ID"] = "test"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
@@ -55,6 +56,40 @@ def _create_tables():
             BillingMode="PAY_PER_REQUEST",
         )
 
+    if "IncidentCatalogTable" not in tables:
+        dynamodb.create_table(
+            TableName="IncidentCatalogTable",
+            AttributeDefinitions=[
+                {"AttributeName": "incidentId", "AttributeType": "S"},
+                {"AttributeName": "catalogPartition", "AttributeType": "S"},
+                {"AttributeName": "catalogSortKey", "AttributeType": "S"},
+            ],
+            KeySchema=[
+                {"AttributeName": "incidentId", "KeyType": "HASH"},
+            ],
+            GlobalSecondaryIndexes=[{
+                "IndexName": "CatalogOrderIndex",
+                "KeySchema": [
+                    {"AttributeName": "catalogPartition", "KeyType": "HASH"},
+                    {"AttributeName": "catalogSortKey", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+
+def _ensure_incident_in_catalog(incident_id: str) -> None:
+    boto3.resource("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1").Table(
+        "IncidentCatalogTable"
+    ).put_item(Item={
+        "incidentId": incident_id,
+        "incidentType": "flood",
+        "incidentName": "Integration Incident",
+        "status": "ACTIVE",
+        "incidentDescription": "Seeded for citizen updates integration test",
+    })
+
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_tables():
@@ -65,8 +100,10 @@ def setup_tables():
 
 
 def _create_request() -> tuple[str, str]:
+    incident_id = f"incident-{uuid.uuid4()}"
+    _ensure_incident_in_catalog(incident_id)
     body = {
-        "incidentId": f"incident-{uuid.uuid4()}",
+        "incidentId": incident_id,
         "requestType": "FLOOD",
         "description": "Citizen update flow test",
         "peopleCount": 2,
