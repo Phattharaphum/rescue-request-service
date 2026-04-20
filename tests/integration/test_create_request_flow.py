@@ -11,6 +11,7 @@ os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:4566"
 os.environ["AWS_REGION"] = "ap-southeast-1"
 os.environ["DYNAMODB_TABLE_NAME"] = "RescueRequestTable"
 os.environ["IDEMPOTENCY_TABLE_NAME"] = "IdempotencyTable"
+os.environ["INCIDENT_CATALOG_TABLE_NAME"] = "IncidentCatalogTable"
 os.environ["SNS_TOPIC_ARN"] = ""
 os.environ["AWS_ACCESS_KEY_ID"] = "test"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
@@ -53,6 +54,39 @@ def _create_tables():
             BillingMode="PAY_PER_REQUEST",
         )
 
+    if "IncidentCatalogTable" not in tables:
+        dynamodb.create_table(
+            TableName="IncidentCatalogTable",
+            AttributeDefinitions=[
+                {"AttributeName": "incidentId", "AttributeType": "S"},
+                {"AttributeName": "catalogPartition", "AttributeType": "S"},
+                {"AttributeName": "catalogSortKey", "AttributeType": "S"},
+            ],
+            KeySchema=[
+                {"AttributeName": "incidentId", "KeyType": "HASH"},
+            ],
+            GlobalSecondaryIndexes=[{
+                "IndexName": "CatalogOrderIndex",
+                "KeySchema": [
+                    {"AttributeName": "catalogPartition", "KeyType": "HASH"},
+                    {"AttributeName": "catalogSortKey", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+
+def _ensure_incident_in_catalog(incident_id: str) -> None:
+    dynamodb = boto3.resource("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
+    dynamodb.Table("IncidentCatalogTable").put_item(Item={
+        "incidentId": incident_id,
+        "incidentType": "flood",
+        "incidentName": "Integration Incident",
+        "status": "ACTIVE",
+        "incidentDescription": "Seeded for create request integration test",
+    })
+
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_tables():
@@ -64,6 +98,9 @@ def setup_tables():
 
 class TestCreateRequestFlow:
     def _build_event(self, body: dict, headers: dict | None = None) -> dict:
+        incident_id = body.get("incidentId")
+        if isinstance(incident_id, str) and incident_id.strip():
+            _ensure_incident_in_catalog(incident_id)
         return {
             "httpMethod": "POST",
             "path": "/v1/rescue-requests",
@@ -225,3 +262,32 @@ class TestCreateRequestFlow:
         }
         response = create_handler(self._build_event(body), None)
         assert response["statusCode"] == 422
+
+    def test_create_request_rejects_unknown_incident_id(self):
+        body = {
+            "incidentId": f"incident-{uuid.uuid4()}",
+            "requestType": "FLOOD",
+            "description": "Unknown incident id",
+            "peopleCount": 2,
+            "latitude": 13.7563,
+            "longitude": 100.5018,
+            "contactName": "Unknown Incident User",
+            "contactPhone": _random_phone(),
+            "sourceChannel": "WEB",
+        }
+        response = create_handler(
+            {
+                "httpMethod": "POST",
+                "path": "/v1/rescue-requests",
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps(body),
+                "pathParameters": None,
+                "queryStringParameters": None,
+            },
+            None,
+        )
+        assert response["statusCode"] == 422
+        result = json.loads(response["body"])
+        assert result["details"] == [
+            {"field": "incidentId", "issue": "must reference an existing incident in IncidentCatalogTable"}
+        ]

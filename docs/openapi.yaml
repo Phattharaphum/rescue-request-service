@@ -145,6 +145,87 @@ paths:
   #  PUBLIC ENDPOINTS
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  /health:
+    get:
+      tags: [Public]
+      operationId: getHealthSummary
+      summary: Combined liveness and readiness probe
+      description: |
+        Returns a summary probe for monitoring integrations.
+
+        Response includes:
+        - `checks.liveness` for process health (always pass while Lambda is running)
+        - `checks.readiness` for dependency health (DynamoDB tables)
+
+        Returns:
+        - `200` when all readiness checks pass
+        - `503` when at least one readiness dependency fails
+      responses:
+        '200':
+          description: Service is alive and ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthSummaryResponse'
+        '503':
+          description: Service process is alive but not ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthSummaryResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health/live:
+    get:
+      tags: [Public]
+      operationId: getHealthLiveness
+      summary: Liveness probe
+      description: |
+        Lightweight process probe used to verify the service runtime is alive.
+        This endpoint does not perform downstream dependency checks.
+      responses:
+        '200':
+          description: Service process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthLivenessResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health/ready:
+    get:
+      tags: [Public]
+      operationId: getHealthReadiness
+      summary: Readiness probe
+      description: |
+        Readiness probe used by load balancers and orchestrators.
+
+        It verifies critical dependencies required for API traffic:
+        - Rescue request table
+        - Idempotency table
+        - Incident catalog table
+
+        Returns:
+        - `200` when every critical dependency check passes
+        - `503` when at least one dependency check fails
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadinessResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadinessResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /incidents:
     get:
       tags: [Public]
@@ -1359,6 +1440,141 @@ components:
         - bedridden
         - children
 
+    HealthStatus:
+      type: string
+      enum: [pass, fail]
+      example: pass
+
+    HealthProcessCheck:
+      type: object
+      required: [status, uptimeMs]
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        uptimeMs:
+          type: integer
+          minimum: 0
+          example: 15342
+
+    HealthDynamoTableCheck:
+      type: object
+      required: [name, tableName, status, latencyMs]
+      properties:
+        name:
+          type: string
+          example: rescueRequestTable
+        tableName:
+          type: string
+          example: RescueRequestTable-dev
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        tableStatus:
+          type: string
+          nullable: true
+          description: DynamoDB table status when available
+          example: ACTIVE
+        latencyMs:
+          type: integer
+          minimum: 0
+          example: 12
+        issue:
+          type: string
+          nullable: true
+          description: Error detail when the check fails
+          example: ResourceNotFoundException: Requested resource not found
+
+    HealthReadinessCheck:
+      type: object
+      required: [status, latencyMs, tables]
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        latencyMs:
+          type: integer
+          minimum: 0
+          example: 25
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/HealthDynamoTableCheck'
+
+    HealthLivenessResponse:
+      type: object
+      required: [service, stage, region, status, timestamp, checks]
+      properties:
+        service:
+          type: string
+          example: rescue-request-service
+        stage:
+          type: string
+          example: dev
+        region:
+          type: string
+          example: ap-southeast-2
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          required: [process]
+          properties:
+            process:
+              $ref: '#/components/schemas/HealthProcessCheck'
+
+    HealthReadinessResponse:
+      type: object
+      required: [service, stage, region, status, timestamp, checks]
+      properties:
+        service:
+          type: string
+          example: rescue-request-service
+        stage:
+          type: string
+          example: dev
+        region:
+          type: string
+          example: ap-southeast-2
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          required: [dynamodb]
+          properties:
+            dynamodb:
+              $ref: '#/components/schemas/HealthReadinessCheck'
+
+    HealthSummaryResponse:
+      type: object
+      required: [service, stage, region, status, timestamp, checks]
+      properties:
+        service:
+          type: string
+          example: rescue-request-service
+        stage:
+          type: string
+          example: dev
+        region:
+          type: string
+          example: ap-southeast-2
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          required: [liveness, readiness]
+          properties:
+            liveness:
+              $ref: '#/components/schemas/HealthProcessCheck'
+            readiness:
+              $ref: '#/components/schemas/HealthReadinessCheck'
+
     # â”€â”€ Request Bodies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     CreateRescueRequestBody:
@@ -1376,7 +1592,7 @@ components:
       properties:
         incidentId:
           type: string
-          description: Identifier of the disaster incident this request belongs to
+          description: Identifier of the disaster incident this request belongs to; must exist in `IncidentCatalogTable` (status is not checked)
           example: "INC-2024-001"
         requestType:
           $ref: '#/components/schemas/RequestType'

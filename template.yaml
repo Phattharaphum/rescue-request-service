@@ -227,6 +227,38 @@ Resources:
         AllowMethods: "'GET,POST,PATCH,OPTIONS'"
 
   # Public Handlers
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.health_check.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IdempotencyTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentCatalogTable
+      Events:
+        HealthSummary:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/health
+            Method: GET
+        HealthLive:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/health/live
+            Method: GET
+        HealthReady:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RescueRequestApi
+            Path: /v1/health/ready
+            Method: GET
+
   CreateRescueRequestFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -237,6 +269,8 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentCatalogTable
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
@@ -255,6 +289,13 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentCatalogTable
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: AllowIncidentCatalogSeedPutItem
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt IncidentCatalogTable.Arn
       Events:
         Api:
           Type: Api
@@ -271,6 +312,13 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentCatalogTable
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: AllowIncidentCatalogSeedPutItem
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt IncidentCatalogTable.Arn
       Events:
         Api:
           Type: Api
@@ -599,6 +647,8 @@ Resources:
             TableName: !Ref RescueRequestTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
       Events:
         PrioritizationEvaluatedQueue:
           Type: SQS

@@ -1,6 +1,9 @@
+import pytest
+
 from src.application.usecases import create_citizen_update
 from src.application.usecases import create_rescue_request
 from src.application.usecases import patch_rescue_request
+from src.shared.errors import ValidationError
 
 
 def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch):
@@ -13,6 +16,7 @@ def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch
     monkeypatch.setattr(create_rescue_request, "generate_tracking_code", lambda: "123456")
     monkeypatch.setattr(create_rescue_request, "hash_tracking_code", lambda value: f"track::{value}")
     monkeypatch.setattr(create_rescue_request, "get_duplicate_signature", lambda **kwargs: "dup-signature")
+    monkeypatch.setattr(create_rescue_request, "get_incident", lambda incident_id: {"incidentId": incident_id})
     monkeypatch.setattr(create_rescue_request, "create_rescue_request", lambda **kwargs: None)
     monkeypatch.setattr(
         create_rescue_request,
@@ -47,6 +51,30 @@ def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch
         "latestPrioritySourceEventType": "rescue-request.created",
         "latestPrioritySourceOccurredAt": "2026-04-18T00:00:00+00:00",
     }
+
+
+def test_create_request_requires_incident_in_catalog(monkeypatch):
+    monkeypatch.setattr(create_rescue_request, "get_incident", lambda incident_id: None)
+
+    with pytest.raises(ValidationError) as exc_info:
+        create_rescue_request.execute({
+            "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
+            "requestType": "FLOOD",
+            "description": "Need evacuation",
+            "peopleCount": 2,
+            "latitude": 13.75,
+            "longitude": 100.5,
+            "contactName": "Test User",
+            "contactPhone": "0812345678",
+            "sourceChannel": "WEB",
+        })
+
+    assert exc_info.value.details == [
+        {
+            "field": "incidentId",
+            "issue": "must reference an existing incident in IncidentCatalogTable",
+        }
+    ]
 
 
 def test_create_citizen_update_stores_latest_priority_source_event_metadata(monkeypatch):

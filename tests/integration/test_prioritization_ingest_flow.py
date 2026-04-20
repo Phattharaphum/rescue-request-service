@@ -10,6 +10,7 @@ os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:4566"
 os.environ["AWS_REGION"] = "ap-southeast-1"
 os.environ["DYNAMODB_TABLE_NAME"] = "RescueRequestTable"
 os.environ["IDEMPOTENCY_TABLE_NAME"] = "IdempotencyTable"
+os.environ["INCIDENT_CATALOG_TABLE_NAME"] = "IncidentCatalogTable"
 os.environ["SNS_TOPIC_ARN"] = ""
 os.environ["AWS_ACCESS_KEY_ID"] = "test"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
@@ -18,6 +19,7 @@ from src.adapters.persistence.rescue_request_repository import get_current_state
 from src.handlers.internal.ingest_rescue_request_evaluations import handler as ingest_handler
 from src.handlers.public.create_citizen_update import handler as create_citizen_update_handler
 from src.handlers.public.create_rescue_request import handler as create_handler
+from src.handlers.public.get_citizen_status import handler as get_citizen_status_handler
 from src.handlers.staff.get_current_state import handler as get_current_handler
 
 
@@ -55,6 +57,40 @@ def _create_tables():
             BillingMode="PAY_PER_REQUEST",
         )
 
+    if "IncidentCatalogTable" not in tables:
+        dynamodb.create_table(
+            TableName="IncidentCatalogTable",
+            AttributeDefinitions=[
+                {"AttributeName": "incidentId", "AttributeType": "S"},
+                {"AttributeName": "catalogPartition", "AttributeType": "S"},
+                {"AttributeName": "catalogSortKey", "AttributeType": "S"},
+            ],
+            KeySchema=[
+                {"AttributeName": "incidentId", "KeyType": "HASH"},
+            ],
+            GlobalSecondaryIndexes=[{
+                "IndexName": "CatalogOrderIndex",
+                "KeySchema": [
+                    {"AttributeName": "catalogPartition", "KeyType": "HASH"},
+                    {"AttributeName": "catalogSortKey", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+
+def _ensure_incident_in_catalog(incident_id: str) -> None:
+    boto3.resource("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1").Table(
+        "IncidentCatalogTable"
+    ).put_item(Item={
+        "incidentId": incident_id,
+        "incidentType": "flood",
+        "incidentName": "Integration Incident",
+        "status": "ACTIVE",
+        "incidentDescription": "Seeded for prioritization ingest integration test",
+    })
+
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_tables():
@@ -66,6 +102,7 @@ def setup_tables():
 
 def _create_request() -> tuple[str, str, str, str]:
     incident_id = str(uuid.uuid4())
+    _ensure_incident_in_catalog(incident_id)
     body = {
         "incidentId": incident_id,
         "requestType": "FLOOD",
@@ -184,6 +221,19 @@ def _get_public_current_state(request_id: str) -> dict:
     return json.loads(current_response["body"])
 
 
+def _get_citizen_status(request_id: str) -> dict:
+    get_event = {
+        "httpMethod": "GET",
+        "headers": {},
+        "body": None,
+        "pathParameters": {"requestId": request_id},
+        "queryStringParameters": None,
+    }
+    response = get_citizen_status_handler(get_event, None)
+    assert response["statusCode"] == 200
+    return json.loads(response["body"])
+
+
 class TestPrioritizationIngestFlow:
     def test_ingests_canonical_evaluated_event_from_created_topic(self):
         request_id, incident_id, _, submitted_at = _create_request()
@@ -207,7 +257,13 @@ class TestPrioritizationIngestFlow:
         assert current["priorityScore"] == 0.91
         assert current["priorityLevel"] == "CRITICAL"
         assert current["status"] == "TRIAGED"
+        assert current["stateVersion"] == 2
         assert current["latestPriorityCorrelationId"] == correlation_id
+        citizen_status = _get_citizen_status(request_id)
+        assert citizen_status["stateVersion"] == 2
+        assert citizen_status["latestEvent"]["newStatus"] == "TRIAGED"
+        assert citizen_status["latestEvent"]["priorityScore"] == 0.91
+        assert len(citizen_status["recentEvents"]) >= 1
 
     def test_accepts_legacy_re_evaluate_event_on_updated_topic(self):
         request_id, incident_id, tracking_code, submitted_at = _create_request()

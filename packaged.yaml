@@ -289,11 +289,50 @@ Resources:
         AllowMethods: '''GET,POST,PATCH,OPTIONS'''
     Metadata:
       SamResourceId: RescueRequestApi
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.public.health_check.handler
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: RescueRequestTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IdempotencyTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IncidentCatalogTable
+      Events:
+        HealthSummary:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/health
+            Method: GET
+        HealthLive:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/health/live
+            Method: GET
+        HealthReady:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: RescueRequestApi
+            Path: /v1/health/ready
+            Method: GET
+    Metadata:
+      SamResourceId: HealthCheckFunction
   CreateRescueRequestFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.create_rescue_request.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -301,6 +340,9 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: IdempotencyTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: IncidentCatalogTable
       - SNSPublishMessagePolicy:
           TopicName:
             Fn::GetAtt:
@@ -320,11 +362,21 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.list_incidents.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
             Ref: IncidentCatalogTable
+      - Version: '2012-10-17'
+        Statement:
+        - Sid: AllowIncidentCatalogSeedPutItem
+          Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          Resource:
+            Fn::GetAtt:
+            - IncidentCatalogTable
+            - Arn
       Events:
         Api:
           Type: Api
@@ -339,11 +391,21 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.internal.list_incident_catalog.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
             Ref: IncidentCatalogTable
+      - Version: '2012-10-17'
+        Statement:
+        - Sid: AllowIncidentCatalogSeedPutItem
+          Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          Resource:
+            Fn::GetAtt:
+            - IncidentCatalogTable
+            - Arn
       Events:
         Api:
           Type: Api
@@ -358,7 +420,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.citizen_tracking_lookup.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -377,7 +439,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.get_citizen_status.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -396,7 +458,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.create_citizen_update.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -423,7 +485,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.public.list_citizen_updates.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -442,7 +504,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.get_rescue_request.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -461,7 +523,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.patch_rescue_request.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -488,7 +550,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.update_rescue_request_priority.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -515,7 +577,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.list_status_events.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -534,7 +596,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.append_status_event.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -561,7 +623,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.get_current_state.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -580,7 +642,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.list_by_incident.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -599,7 +661,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.staff.get_idempotency_record.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBReadPolicy:
           TableName:
@@ -618,7 +680,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.triage.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -645,7 +707,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.assign.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -672,7 +734,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.start.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -699,7 +761,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.resolve.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -726,7 +788,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.commands.cancel.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -753,7 +815,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.internal.ingest_rescue_request_evaluations.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -761,6 +823,11 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: IdempotencyTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Fn::GetAtt:
+            - RescueRequestEventsTopic
+            - TopicName
       Events:
         PrioritizationEvaluatedQueue:
           Type: SQS
@@ -778,7 +845,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src.handlers.internal.sync_incidents.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/e7c7ccd4bb91ced8d5fdfafb526be537
+      CodeUri: s3://cs366-01-microservice-game-v01/803374cb747dbf10c0a1a7a367473f38
       Timeout: 30
       Policies:
       - DynamoDBCrudPolicy:
@@ -800,7 +867,7 @@ Resources:
     Properties:
       Runtime: nodejs20.x
       Handler: src/poller.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/a2aa734a1c9a5ed0b2977f7e647bfb56
+      CodeUri: s3://cs366-01-microservice-game-v01/82c3a39f7badfc8fe4f23e62aa5460c6
       Timeout: 60
       Environment:
         Variables:
@@ -834,7 +901,7 @@ Resources:
     Properties:
       Runtime: nodejs20.x
       Handler: src/stream.handler
-      CodeUri: s3://cs366-01-microservice-game-v01/a2aa734a1c9a5ed0b2977f7e647bfb56
+      CodeUri: s3://cs366-01-microservice-game-v01/82c3a39f7badfc8fe4f23e62aa5460c6
       Timeout: 900
       Environment:
         Variables:

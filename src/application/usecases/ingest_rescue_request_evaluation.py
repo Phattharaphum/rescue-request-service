@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from src.adapters.persistence.rescue_request_repository import get_current_state, update_current_fields
+from src.adapters.persistence.rescue_request_repository import append_event_and_update_current, get_current_state
+from src.application.services.event_publisher import publish_status_changed
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
 from src.domain.enums.request_status import RequestStatus
 from src.shared.errors import NotFoundError, ValidationError
@@ -75,11 +76,19 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
             )
             return result
 
+        current_version_raw = current.get("stateVersion")
+        expected_version = current_version_raw if isinstance(current_version_raw, int) else None
+        current_version = expected_version if expected_version is not None else 0
+        new_version = current_version + 1
+        event_id = str(uuid.uuid4())
+        resolved_status = _resolve_ingested_status(current_status)
         now = datetime.now(timezone.utc).isoformat()
         updates = {
             "priorityScore": _normalize_priority_score(body["priorityScore"]),
             "priorityLevel": body["priorityLevel"],
-            "status": _resolve_ingested_status(current_status),
+            "status": resolved_status,
+            "stateVersion": new_version,
+            "lastEventId": event_id,
             "latestPriorityEvaluationId": body["evaluateId"],
             "latestPriorityReason": body["evaluateReason"],
             "latestPriorityEvaluatedAt": body["lastEvaluatedAt"],
@@ -88,7 +97,47 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
             "lastUpdatedAt": now,
             "lastUpdatedBy": "prioritization-service",
         }
-        update_current_fields(request_id=body["requestId"], updates=updates)
+        event_item = {
+            "PK": f"REQ#{body['requestId']}",
+            "SK": f"EVENT#{new_version:010d}",
+            "eventId": event_id,
+            "requestId": body["requestId"],
+            "previousStatus": current_status.value,
+            "newStatus": resolved_status,
+            "changedBy": "prioritization-service",
+            "changedByRole": "system",
+            "changeReason": body["evaluateReason"],
+            "meta": {
+                "source": "prioritization-service",
+                "evaluateId": body["evaluateId"],
+                "priorityLevel": body["priorityLevel"],
+                "priorityScore": updates["priorityScore"],
+                "evaluatedAt": body["lastEvaluatedAt"],
+            },
+            "priorityScore": updates["priorityScore"],
+            "responderUnitId": None,
+            "version": new_version,
+            "occurredAt": now,
+            "itemType": "STATUS_EVENT",
+        }
+        append_event_and_update_current(
+            request_id=body["requestId"],
+            event_item=event_item,
+            current_updates=updates,
+            expected_version=expected_version,
+        )
+
+        try:
+            publish_status_changed(
+                request_id=body["requestId"],
+                previous_status=current_status.value,
+                new_status=resolved_status,
+                event_id=event_id,
+                version=new_version,
+                correlation_id=actual_correlation,
+            )
+        except Exception:
+            logger.exception("Failed to publish status-changed after prioritization ingest")
 
         result = {
             "status": "updated",
@@ -96,6 +145,10 @@ def execute(message: dict[str, Any]) -> dict[str, Any]:
             "evaluateId": body["evaluateId"],
             "priorityScore": updates["priorityScore"],
             "priorityLevel": updates["priorityLevel"],
+            "previousStatus": current_status.value,
+            "newStatus": resolved_status,
+            "eventId": event_id,
+            "version": new_version,
         }
         finalize_success(
             idempotency_key=idempotency_key,
