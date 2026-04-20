@@ -86,8 +86,7 @@ info:
     `GET /v1/incidents` serves the locally stored incident catalog used by clients when
     selecting an incident. The catalog is refreshed asynchronously from IncidentTracking
     Service every 30 minutes, so the REST API reads from the database snapshot instead of
-    calling the external service inline. The table is also bootstrapped with five hardmock
-    incidents (`IncidentA` through `IncidentE`) for internal testing and UI initialization.
+    calling the external service inline.
 
     ## Internal Stream Relay
 
@@ -238,9 +237,6 @@ paths:
         This endpoint reads from the service-owned incident catalog table, which is
         refreshed asynchronously from IncidentTracking Service every 30 minutes.
         It does not call the external incident API inline.
-
-        The catalog table is bootstrapped with five hardmock incidents (`IncidentA`
-        through `IncidentE`) and may also contain synced upstream incidents.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -283,9 +279,6 @@ paths:
       description: |
         Returns every item currently stored in `IncidentCatalogTable`, mapped into a
         narrow internal response shape.
-
-        This endpoint includes the five hardmock seed rows as well as any incidents
-        synced from IncidentTracking Service.
       responses:
         '200':
           description: Full internal incident catalog snapshot
@@ -295,14 +288,14 @@ paths:
                 $ref: '#/components/schemas/InternalIncidentCatalogListResponse'
               example:
                 items:
-                  - incident_id: "MOCK-INC-001"
+                  - incident_id: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
                     incident_type: "flood"
                     incident_name: "IncidentA"
                     status: "REPORTED"
-                    incident_description: "Mock flood incident for internal testing and UI bootstrap"
-                  - incident_id: "019C774D-1AC5-758B-AE95-5CD4AEB89258"
+                    incident_description: "Flooding reported near main road and residential alley"
+                  - incident_id: "5c6f3f4d-2c67-4c78-9caa-4df94cbf6ec1"
                     incident_type: "fire"
-                    incident_name: "IncidentF"
+                    incident_name: "IncidentB"
                     status: "REPORTED"
                     incident_description: "Fire reported near TU Dome (Verified)"
         '500':

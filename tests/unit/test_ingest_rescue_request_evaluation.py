@@ -273,6 +273,55 @@ def test_accepts_legacy_re_evaluate_message_type_on_updated_channel(monkeypatch)
     assert appended_calls["updates"]["latestPriorityEvaluationId"] == "812748a6-5a3a-43c5-8b4f-140034ece737"
 
 
+def test_accepts_legacy_re_evaluate_message_type_on_consolidated_topic(monkeypatch):
+    appended_calls: dict = {}
+
+    monkeypatch.setattr(usecase, "check_and_reserve", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "get_current_state", lambda request_id: _current_state(request_id))
+    monkeypatch.setattr(
+        usecase,
+        "append_event_and_update_current",
+        lambda request_id, event_item, current_updates, expected_version=None: appended_calls.update({
+            "request_id": request_id,
+            "updates": current_updates,
+        }),
+    )
+    monkeypatch.setattr(usecase, "publish_status_changed", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_success", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_failure", lambda **kwargs: None)
+
+    message = _message(message_type="RescueRequestReEvaluateEvent")
+    message["header"]["topicArn"] = "arn:aws:sns:us-east-1:955468203539:rescue-prioritization-events-v1"
+
+    result = usecase.execute(message)
+
+    assert result["status"] == "updated"
+    assert appended_calls["request_id"] == "req-1"
+
+
+def test_accepts_legacy_evaluate_message_type_without_d(monkeypatch):
+    appended_calls: dict = {}
+
+    monkeypatch.setattr(usecase, "check_and_reserve", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "get_current_state", lambda request_id: _current_state(request_id))
+    monkeypatch.setattr(
+        usecase,
+        "append_event_and_update_current",
+        lambda request_id, event_item, current_updates, expected_version=None: appended_calls.update({
+            "request_id": request_id,
+            "updates": current_updates,
+        }),
+    )
+    monkeypatch.setattr(usecase, "publish_status_changed", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_success", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_failure", lambda **kwargs: None)
+
+    result = usecase.execute(_message(message_type="RescueRequestEvaluateEvent"))
+
+    assert result["status"] == "updated"
+    assert appended_calls["request_id"] == "req-1"
+
+
 def test_rejects_legacy_re_evaluate_message_type_on_created_channel():
     with pytest.raises(ValidationError) as exc_info:
         usecase.execute(

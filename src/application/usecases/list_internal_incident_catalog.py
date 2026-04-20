@@ -1,9 +1,7 @@
 from src.adapters.persistence.incident_catalog_repository import list_all_incidents
-from src.application.services.incident_catalog_seed import ensure_mock_incidents_seeded
 
 
 def execute() -> dict:
-    ensure_mock_incidents_seeded()
     items = sorted(
         list_all_incidents(),
         key=lambda item: (

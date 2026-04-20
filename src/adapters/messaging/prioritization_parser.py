@@ -61,6 +61,8 @@ def _infer_channel(topic_arn: Any) -> str | None:
         return "rescue.prioritization.created.v1"
     if "rescue-prioritization-updated-v1" in topic_arn:
         return "rescue.prioritization.updated.v1"
+    if "rescue-prioritization-events-v1" in topic_arn:
+        return "rescue.prioritization.events.v1"
     return None
 
 

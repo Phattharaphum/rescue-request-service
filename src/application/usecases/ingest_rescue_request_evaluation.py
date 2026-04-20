@@ -15,7 +15,12 @@ logger = get_logger(__name__)
 
 ALLOWED_PRIORITY_LEVELS = {"LOW", "NORMAL", "HIGH", "CRITICAL"}
 CANONICAL_MESSAGE_TYPE = "RescueRequestEvaluatedEvent"
+LEGACY_CANONICAL_MESSAGE_TYPE = "RescueRequestEvaluateEvent"
 LEGACY_UPDATED_MESSAGE_TYPE = "RescueRequestReEvaluateEvent"
+UPDATED_RESULT_CHANNEL = "rescue.prioritization.updated.v1"
+CONSOLIDATED_RESULT_CHANNEL = "rescue.prioritization.events.v1"
+UPDATED_RESULT_TOPIC_HINT = "rescue-prioritization-updated-v1"
+CONSOLIDATED_RESULT_TOPIC_HINT = "rescue-prioritization-events-v1"
 
 
 def execute(message: dict[str, Any]) -> dict[str, Any]:
@@ -259,7 +264,7 @@ def _normalize_message(message: dict[str, Any]) -> dict[str, Any]:
 
     normalized_header = {
         "messageId": raw_header.get("messageId"),
-        "messageType": raw_header.get("messageType") or _map_event_type(raw_header.get("eventType")),
+        "messageType": _normalize_message_type(raw_header),
         "correlationId": raw_header.get("correlationId"),
         "sentAt": raw_header.get("sentAt") or raw_header.get("occurredAt"),
         "version": raw_header.get("version") or raw_header.get("schemaVersion"),
@@ -286,6 +291,13 @@ def _map_event_type(event_type: Any) -> str | None:
     return event_type if isinstance(event_type, str) else None
 
 
+def _normalize_message_type(raw_header: dict[str, Any]) -> str | None:
+    message_type = raw_header.get("messageType") or _map_event_type(raw_header.get("eventType"))
+    if message_type == LEGACY_CANONICAL_MESSAGE_TYPE:
+        return CANONICAL_MESSAGE_TYPE
+    return message_type
+
+
 def _is_version_1(value: Any) -> bool:
     if value is None:
         return False
@@ -307,10 +319,12 @@ def _is_supported_message_type(header: dict[str, Any]) -> bool:
 
 
 def _is_updated_result_channel(header: dict[str, Any]) -> bool:
-    if header.get("channel") == "rescue.prioritization.updated.v1":
+    if header.get("channel") in {UPDATED_RESULT_CHANNEL, CONSOLIDATED_RESULT_CHANNEL}:
         return True
     topic_arn = header.get("topicArn")
-    return isinstance(topic_arn, str) and "rescue-prioritization-updated-v1" in topic_arn
+    return isinstance(topic_arn, str) and any(
+        hint in topic_arn for hint in {UPDATED_RESULT_TOPIC_HINT, CONSOLIDATED_RESULT_TOPIC_HINT}
+    )
 
 
 def _is_uuid(value: Any) -> bool:

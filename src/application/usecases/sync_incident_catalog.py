@@ -6,14 +6,12 @@ from src.adapters.persistence.incident_catalog_repository import (
     list_all_incidents,
     upsert_incident,
 )
-from src.application.services.incident_catalog_seed import ensure_mock_incidents_seeded
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def execute() -> dict:
-    ensure_mock_incidents_seeded()
     raw_incidents = fetch_incidents()
     existing_items = {item["incidentId"]: item for item in list_all_incidents() if item.get("incidentId")}
     next_sequence = get_next_incident_sequence()
