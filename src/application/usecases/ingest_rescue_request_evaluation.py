@@ -278,6 +278,7 @@ def _normalize_message(message: dict[str, Any]) -> dict[str, Any]:
     )
     normalized_body["evaluateReason"] = raw_body.get("evaluateReason") or raw_body.get("reason")
     normalized_body["lastEvaluatedAt"] = raw_body.get("lastEvaluatedAt") or raw_body.get("evaluatedAt")
+    normalized_body["specialNeeds"] = _normalize_special_needs(raw_body.get("specialNeeds"))
 
     return {
         "header": normalized_header,
@@ -369,3 +370,32 @@ def _is_string_list(value: Any) -> bool:
     if not isinstance(value, list):
         return False
     return all(_non_empty_text(item) for item in value)
+
+
+def _normalize_special_needs(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text:
+        return value
+
+    # Backward compatibility: some producers send specialNeeds as plain/comma-separated text.
+    if text.startswith("[") and text.endswith("]"):
+        parsed = _try_parse_json_list(text)
+        if parsed is not None:
+            return parsed
+
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def _try_parse_json_list(value: str) -> list[Any] | None:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, list) else None
