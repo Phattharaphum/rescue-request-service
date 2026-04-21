@@ -76,8 +76,10 @@ def execute(
         )
 
     try:
+        incident_id = master.get("incidentId") or current.get("incidentId")
         header = publish_citizen_updated(
             request_id=request_id,
+            incident_id=incident_id,
             update_id="patch",
             update_type="PATCH",
             update_payload=updates,

@@ -79,6 +79,7 @@ def test_create_request_requires_incident_in_catalog(monkeypatch):
 
 def test_create_citizen_update_stores_latest_priority_source_event_metadata(monkeypatch):
     captured_updates: dict = {}
+    captured_publish: dict = {}
 
     monkeypatch.setattr(
         create_citizen_update,
@@ -88,7 +89,11 @@ def test_create_citizen_update_stores_latest_priority_source_event_metadata(monk
     monkeypatch.setattr(
         create_citizen_update,
         "get_master",
-        lambda request_id: {"requestId": request_id, "trackingCodeHash": "track::123456"},
+        lambda request_id: {
+            "requestId": request_id,
+            "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
+            "trackingCodeHash": "track::123456",
+        },
     )
     monkeypatch.setattr(create_citizen_update, "hash_tracking_code", lambda value: f"track::{value}")
     monkeypatch.setattr(create_citizen_update, "put_citizen_update", lambda item: None)
@@ -96,7 +101,7 @@ def test_create_citizen_update_stores_latest_priority_source_event_metadata(monk
     monkeypatch.setattr(
         create_citizen_update,
         "publish_citizen_updated",
-        lambda **kwargs: {
+        lambda **kwargs: captured_publish.update(kwargs) or {
             "messageId": "58e0e0ec-cab0-4890-8d54-f9dca112df5e",
             "eventType": "rescue-request.citizen-updated",
             "occurredAt": "2026-04-18T01:00:00+00:00",
@@ -123,10 +128,12 @@ def test_create_citizen_update_stores_latest_priority_source_event_metadata(monk
         "latestPrioritySourceEventType": "rescue-request.citizen-updated",
         "latestPrioritySourceOccurredAt": "2026-04-18T01:00:00+00:00",
     }
+    assert captured_publish["incident_id"] == "019c774d-1ac5-758b-ae95-5cd4aeb89258"
 
 
 def test_patch_request_stores_latest_priority_source_event_metadata(monkeypatch):
     captured_updates: dict = {}
+    captured_publish: dict = {}
 
     monkeypatch.setattr(
         patch_rescue_request,
@@ -136,13 +143,17 @@ def test_patch_request_stores_latest_priority_source_event_metadata(monkeypatch)
     monkeypatch.setattr(
         patch_rescue_request,
         "get_master",
-        lambda request_id: {"requestId": request_id, "description": "Old description"},
+        lambda request_id: {
+            "requestId": request_id,
+            "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
+            "description": "Old description",
+        },
     )
     monkeypatch.setattr(patch_rescue_request, "update_master_fields", lambda request_id, updates, expected_version=None: None)
     monkeypatch.setattr(
         patch_rescue_request,
         "publish_citizen_updated",
-        lambda **kwargs: {
+        lambda **kwargs: captured_publish.update(kwargs) or {
             "messageId": "d1e60ee4-c3e6-4240-a9f4-b4d0bf28ccf9",
             "eventType": "rescue-request.citizen-updated",
             "occurredAt": "2026-04-18T02:00:00+00:00",
@@ -165,3 +176,4 @@ def test_patch_request_stores_latest_priority_source_event_metadata(monkeypatch)
         "latestPrioritySourceEventType": "rescue-request.citizen-updated",
         "latestPrioritySourceOccurredAt": "2026-04-18T02:00:00+00:00",
     }
+    assert captured_publish["incident_id"] == "019c774d-1ac5-758b-ae95-5cd4aeb89258"

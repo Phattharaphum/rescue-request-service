@@ -39,11 +39,14 @@ def publish_citizen_updated(
     request_id: str,
     update_id: str,
     update_type: str,
+    incident_id: str | None = None,
     correlation_id: str | None = None,
     update_payload: dict | None = None,
     created_at: str | None = None,
 ) -> dict | None:
     body = {"requestId": request_id, "updateId": update_id, "updateType": update_type}
+    if incident_id is not None:
+        body["incidentId"] = incident_id
     if update_payload is not None:
         body["updatePayload"] = update_payload
     if created_at is not None:

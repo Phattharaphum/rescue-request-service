@@ -16,6 +16,7 @@ class TestPublishCitizenUpdated:
             request_id="req-1",
             update_id="upd-1",
             update_type="NOTE",
+            incident_id="inc-1",
             update_payload={"note": "Water rising"},
             created_at="2026-03-10T03:00:00+00:00",
         )
@@ -27,6 +28,7 @@ class TestPublishCitizenUpdated:
             "requestId": "req-1",
             "updateId": "upd-1",
             "updateType": "NOTE",
+            "incidentId": "inc-1",
             "updatePayload": {"note": "Water rising"},
             "createdAt": "2026-03-10T03:00:00+00:00",
         }
@@ -43,12 +45,14 @@ class TestPublishCitizenUpdated:
             request_id="req-2",
             update_id="upd-2",
             update_type="PATCH",
+            incident_id="inc-2",
         )
 
         assert captured["body"] == {
             "requestId": "req-2",
             "updateId": "upd-2",
             "updateType": "PATCH",
+            "incidentId": "inc-2",
         }
 
 
