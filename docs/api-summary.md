@@ -145,7 +145,13 @@ All errors share the same JSON structure:
 
 ### RequestType
 
-`FLOOD` · `FIRE` · `EARTHQUAKE` · `LANDSLIDE` · `STORM` · `MEDICAL` · `EVACUATION` · `SUPPLY` · `OTHER`
+`requestType` accepts only these values:
+
+| Value | Label |
+|-------|-------|
+| `MEDICAL` | การแพทย์ / ยา / ผู้ป่วยฉุกเฉิน |
+| `EVACUATION` | อพยพออกจากพื้นที่ / ช่วยเหลือฉุกเฉิน / ติดค้าง |
+| `SUPPLY` | อาหาร / น้ำดื่ม / เสบียง |
 
 ### SourceChannel
 
@@ -246,7 +252,7 @@ the same incident, phone, request type, approximate location, and submission tim
 ```json
 {
   "incidentId": "INC-2024-001",
-  "requestType": "FLOOD",
+  "requestType": "EVACUATION",
   "description": "Water level rising rapidly, 5 people trapped on second floor",
   "peopleCount": 5,
   "latitude": 13.7563,
@@ -332,7 +338,7 @@ Returns a detailed citizen-facing status snapshot for tracking progress.
 {
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
   "incidentId": "INC-2024-001",
-  "requestType": "FLOOD",
+  "requestType": "EVACUATION",
   "status": "ASSIGNED",
   "statusMessage": "?????????????????????????????? ??????????????????????????",
   "nextSuggestedAction": "????????????????????????????????????????",
@@ -576,7 +582,7 @@ Optionally embeds the status-event history.
   "master": {
     "requestId": "550e8400-e29b-41d4-a716-446655440000",
     "incidentId": "INC-2024-001",
-    "requestType": "FLOOD",
+    "requestType": "EVACUATION",
     "description": "Water level rising rapidly, 5 people trapped on second floor",
     "peopleCount": 5,
     "specialNeeds": "Elderly person, needs wheelchair",
@@ -817,7 +823,7 @@ Each item is the master request record enriched with the latest `status` and a
       "requestId": "550e8400-e29b-41d4-a716-446655440000",
       "incidentId": "INC-2024-001",
       "status": "ASSIGNED",
-      "requestType": "FLOOD",
+      "requestType": "EVACUATION",
       "description": "Water level rising rapidly, 5 people trapped on second floor",
       "peopleCount": 5,
       "specialNeeds": "Elderly person, needs wheelchair",
@@ -1175,7 +1181,7 @@ Body contract:
 | Field | Type | Description |
 |-------|------|-------------|
 | `requestId` | UUID | Request id |
-| `data` | object | Full persisted master request snapshot at creation time (includes service-internal storage fields) |
+| `data` | object | Full persisted master request snapshot at creation time (includes service-internal storage fields and `incidentType` copied from `IncidentCatalogTable`) |
 
 Message body example:
 
@@ -1188,12 +1194,13 @@ Message body example:
     "itemType": "MASTER",
     "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
     "incidentId": "f3e1c8b2-6a1d-4c22-a9f3-5f8b7a1d2e10",
-    "requestType": "FLOOD",
-    "description": "ระดับน้ำเพิ่มสูงอย่างรวดเร็ว",
+    "incidentType": "flood",
+    "requestType": "EVACUATION",
+    "description": "????????????????????????????",
     "peopleCount": 2,
     "latitude": 13.7563,
     "longitude": 100.5018,
-    "contactName": "สมชาย ใจดี",
+    "contactName": "????? ????",
     "contactPhone": "0812345678",
     "sourceChannel": "MOBILE",
     "submittedAt": "2026-04-20T16:05:10.111222+00:00"
@@ -1594,7 +1601,7 @@ Result body example:
   "requestId": "REQ-8812-8888",
   "incidentId": "8b9b6d5b-7d5e-4d0b-a7e2-2a0a6bd5c111",
   "evaluateId": "812748a6-5a3a-43c5-8b4f-140034ece737",
-  "requestType": "flood_rescue",
+  "requestType": "EVACUATION",
   "priorityScore": 0.3,
   "priorityLevel": "NORMAL",
   "evaluateReason": "Lack of food reserves indicates a potential need for assistance, but no immediate life-threatening situation is apparent. Location is accessible.",
@@ -1625,7 +1632,7 @@ Required inbound fields:
 - `body.requestId`
 - `body.incidentId`
 - `body.evaluateId`
-- `body.requestType`
+- `body.requestType` is one of `MEDICAL`, `EVACUATION`, `SUPPLY`
 - `body.priorityScore`
 - `body.priorityLevel`
 - `body.evaluateReason`

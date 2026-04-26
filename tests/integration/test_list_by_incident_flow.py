@@ -101,7 +101,7 @@ def _create_request(incident_id: str, contact_phone: str) -> str:
     _ensure_incident_in_catalog(incident_id)
     body = {
         "incidentId": incident_id,
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "description": "Need evacuation support",
         "peopleCount": 3,
         "latitude": 13.7563,

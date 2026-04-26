@@ -8,6 +8,7 @@ from src.adapters.persistence.rescue_request_repository import append_event_and_
 from src.application.services.event_publisher import publish_status_changed
 from src.application.services.idempotency_service import check_and_reserve, finalize_failure, finalize_success
 from src.domain.enums.request_status import RequestStatus
+from src.domain.enums.request_type import RequestType
 from src.shared.errors import NotFoundError, ValidationError
 from src.shared.logger import get_logger
 
@@ -206,6 +207,8 @@ def _validate_message(header: dict[str, Any], body: dict[str, Any]) -> list[dict
 
     if not _non_empty_text(body.get("requestType")):
         errors.append({"field": "body.requestType", "issue": "is required"})
+    elif body.get("requestType") not in {item.value for item in RequestType}:
+        errors.append({"field": "body.requestType", "issue": f"must be one of: {_request_type_values()}"})
 
     priority_score = body.get("priorityScore")
     if isinstance(priority_score, bool) or not isinstance(priority_score, (int, float)):
@@ -252,6 +255,10 @@ def _normalize_priority_score(value: Any) -> float | int:
     if isinstance(value, int):
         return value
     return float(value)
+
+
+def _request_type_values() -> str:
+    return ", ".join(item.value for item in RequestType)
 
 
 def _normalize_message(message: dict[str, Any]) -> dict[str, Any]:

@@ -117,7 +117,7 @@ Canonical payload:
     "requestId": "REQ-8812-4444",
     "incidentId": "8b9b6d5b-7d5e-4d0b-a7e2-2a0a6bd5c111",
     "evaluateId": "b26c6606-c16f-4f25-bb4c-3cd1c9f7005f",
-    "requestType": "flood_rescue",
+    "requestType": "EVACUATION",
     "priorityScore": 0.3,
     "priorityLevel": "NORMAL",
     "evaluateReason": "Lack of food reserves indicates a potential need for assistance.",
@@ -153,7 +153,7 @@ Inbound result messages must satisfy:
 - `body.requestId` is present
 - `body.incidentId` is a valid UUID
 - `body.evaluateId` is a valid UUID
-- `body.requestType` is present
+- `body.requestType` is one of `MEDICAL`, `EVACUATION`, `SUPPLY`
 - `body.priorityScore` is a decimal between `0` and `1`
 - `body.priorityLevel` is one of `LOW`, `NORMAL`, `HIGH`, `CRITICAL`
 - `body.evaluateReason` is present

@@ -104,7 +104,7 @@ def _create_request() -> tuple[str, str]:
     _ensure_incident_in_catalog(incident_id)
     body = {
         "incidentId": incident_id,
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "description": "Citizen status details test",
         "peopleCount": 4,
         "latitude": 13.7563,

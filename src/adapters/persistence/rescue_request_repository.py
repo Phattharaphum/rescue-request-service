@@ -9,7 +9,7 @@ from botocore.exceptions import ClientError
 from src.adapters.persistence.dynamodb_client import get_dynamodb_resource
 from src.adapters.utils.cursor import decode_cursor, encode_cursor
 from src.shared.config import DYNAMODB_TABLE_NAME, STAGE
-from src.shared.errors import ConflictError, NotFoundError, ValidationError
+from src.shared.errors import ConflictError, ValidationError
 from src.shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +30,65 @@ def _convert_decimals(obj):
     if isinstance(obj, list):
         return [_convert_decimals(i) for i in obj]
     return obj
+
+
+def _scan_request_keys_and_refs() -> list[dict[str, Any]]:
+    table = _get_table()
+    items: list[dict[str, Any]] = []
+    last_evaluated_key = None
+
+    while True:
+        kwargs: dict[str, Any] = {
+            "ProjectionExpression": "#pk, #sk, requestId, incidentId, itemType",
+            "ExpressionAttributeNames": {
+                "#pk": "PK",
+                "#sk": "SK",
+            },
+        }
+        if last_evaluated_key:
+            kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+        response = table.scan(**kwargs)
+        items.extend(_convert_decimals(item) for item in response.get("Items", []))
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+
+    return items
+
+
+def delete_all_request_items() -> int:
+    table = _get_table()
+    items = _scan_request_keys_and_refs()
+
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+
+    return len(items)
+
+
+def list_request_master_refs() -> list[dict[str, Any]]:
+    return [
+        item
+        for item in _scan_request_keys_and_refs()
+        if item.get("itemType") == "MASTER" and item.get("requestId")
+    ]
+
+
+def delete_requests_by_ids(request_ids: set[str]) -> int:
+    if not request_ids:
+        return 0
+
+    table = _get_table()
+    deleted = 0
+    with table.batch_writer() as batch:
+        for item in _scan_request_keys_and_refs():
+            request_id = item.get("requestId")
+            if isinstance(request_id, str) and request_id in request_ids:
+                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+                deleted += 1
+    return deleted
 
 
 def _to_dynamodb_item(data: dict) -> dict:

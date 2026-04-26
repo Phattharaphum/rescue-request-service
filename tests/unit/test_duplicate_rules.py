@@ -6,7 +6,7 @@ class TestBuildDuplicateSignature:
         sig1 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",
@@ -14,7 +14,7 @@ class TestBuildDuplicateSignature:
         sig2 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:01:00+00:00",
@@ -25,7 +25,7 @@ class TestBuildDuplicateSignature:
         sig1 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",
@@ -33,7 +33,7 @@ class TestBuildDuplicateSignature:
         sig2 = build_duplicate_signature(
             incident_id="inc-002",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",
@@ -44,7 +44,7 @@ class TestBuildDuplicateSignature:
         sig1 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",
@@ -52,7 +52,7 @@ class TestBuildDuplicateSignature:
         sig2 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0899999999",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",
@@ -63,7 +63,7 @@ class TestBuildDuplicateSignature:
         sig1 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",
@@ -71,7 +71,7 @@ class TestBuildDuplicateSignature:
         sig2 = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:10:00+00:00",  # Different 5-minute bucket
@@ -82,7 +82,7 @@ class TestBuildDuplicateSignature:
         sig = build_duplicate_signature(
             incident_id="inc-001",
             contact_phone="0812345678",
-            request_type="FLOOD",
+            request_type="EVACUATION",
             latitude=13.7563,
             longitude=100.5018,
             submitted_at="2024-01-01T12:00:00+00:00",

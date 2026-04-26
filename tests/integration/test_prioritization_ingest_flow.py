@@ -105,7 +105,7 @@ def _create_request() -> tuple[str, str, str, str]:
     _ensure_incident_in_catalog(incident_id)
     body = {
         "incidentId": incident_id,
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "description": "Priority evaluation integration test",
         "peopleCount": 2,
         "latitude": 13.7563,
@@ -158,7 +158,7 @@ def _build_evaluated_message(
         "requestId": request_id,
         "incidentId": incident_id,
         "evaluateId": evaluate_id or str(uuid.uuid4()),
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "priorityScore": 0.91,
         "priorityLevel": "CRITICAL",
         "evaluateReason": "Children and bedridden residents need urgent rescue.",

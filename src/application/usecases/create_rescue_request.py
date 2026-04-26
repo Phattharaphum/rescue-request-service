@@ -121,6 +121,7 @@ def execute(
         "itemType": "MASTER",
         "requestId": request_id,
         "incidentId": body["incidentId"],
+        "incidentType": incident.get("incidentType") or incident.get("incident_type"),
         "requestType": body["requestType"],
         "description": body["description"],
         "peopleCount": people_count,

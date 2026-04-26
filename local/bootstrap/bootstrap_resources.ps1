@@ -9,6 +9,8 @@ $incidentSyncApiUrl = if ($env:INCIDENT_SYNC_API_URL) { $env:INCIDENT_SYNC_API_U
 $incidentSyncApiKey = if ($env:INCIDENT_SYNC_API_KEY) { $env:INCIDENT_SYNC_API_KEY } else { "123" }
 $incidentSyncAccept = if ($env:INCIDENT_SYNC_ACCEPT) { $env:INCIDENT_SYNC_ACCEPT } else { "application/json" }
 $incidentSyncTxnHeader = if ($env:INCIDENT_SYNC_TRANSACTION_ID_HEADER) { $env:INCIDENT_SYNC_TRANSACTION_ID_HEADER } else { "X-IncidentTNX-Id" }
+$internalApiKeySecretName = if ($env:INTERNAL_API_KEY_SECRET_ID) { $env:INTERNAL_API_KEY_SECRET_ID } else { "api-key-rs" }
+$internalApiKey = if ($env:INTERNAL_API_KEY) { $env:INTERNAL_API_KEY } else { "local-internal-api-key" }
 
 function Test-CommandAvailable {
   param([string]$CommandName)
@@ -307,6 +309,47 @@ function Ensure-IncidentSyncSecret {
   }
 }
 
+function Ensure-InternalApiKeySecret {
+  $secretPayload = @{
+    apiKey = $internalApiKey
+  } | ConvertTo-Json -Compress
+
+  $payloadFile = New-TempJsonFile -Content $secretPayload
+  try {
+    $exists = Invoke-AwsCli -Quiet -Arguments @(
+      "secretsmanager", "describe-secret",
+      "--secret-id", $internalApiKeySecretName,
+      "--endpoint-url", $endpoint,
+      "--region", $region
+    )
+
+    if ($exists -eq 0) {
+      [void](Invoke-AwsCliCapture -Arguments @(
+        "secretsmanager", "put-secret-value",
+        "--secret-id", $internalApiKeySecretName,
+        "--secret-string", "file://$payloadFile",
+        "--endpoint-url", $endpoint,
+        "--region", $region
+      ))
+      Write-Host "Secret updated: $internalApiKeySecretName"
+      return
+    }
+
+    [void](Invoke-AwsCliCapture -Arguments @(
+      "secretsmanager", "create-secret",
+      "--name", $internalApiKeySecretName,
+      "--secret-string", "file://$payloadFile",
+      "--endpoint-url", $endpoint,
+      "--region", $region
+    ))
+    Write-Host "Secret created: $internalApiKeySecretName"
+  } finally {
+    if (Test-Path $payloadFile) {
+      Remove-Item -LiteralPath $payloadFile -Force
+    }
+  }
+}
+
 Write-Host "Using AWS invocation mode: $awsInvocationMode"
 Wait-ForServices
 
@@ -384,6 +427,8 @@ Ensure-SnsSubscription -TopicArn $priorUpdatedTopicArn -QueueArn $priorQueueArn
 
 Write-Host "Bootstrapping incident sync secret..."
 Ensure-IncidentSyncSecret
+Write-Host "Bootstrapping internal api-key secret..."
+Ensure-InternalApiKeySecret
 
 Write-Host "LocalStack bootstrap complete."
 Write-Host "Resource summary:"
@@ -394,3 +439,4 @@ Write-Host "  rescue-prioritization-updated-v1 => $priorUpdatedTopicArn"
 Write-Host "  rescue-prioritization-evaluated => $priorQueueUrl"
 Write-Host "  rescue-prioritization-evaluated-dlq => $priorDlqUrl"
 Write-Host "  incident secret => $incidentSyncSecretName"
+Write-Host "  internal api-key secret => $internalApiKeySecretName"

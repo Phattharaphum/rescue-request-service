@@ -60,6 +60,14 @@ Single-table design with composite primary key:
 - `requestId`
 - `incidentId`
 - `requestType`
+
+Allowed `requestType` values:
+
+| Value | Label |
+|-------|-------|
+| `MEDICAL` | การแพทย์ / ยา / ผู้ป่วยฉุกเฉิน |
+| `EVACUATION` | อพยพออกจากพื้นที่ / ช่วยเหลือฉุกเฉิน / ติดค้าง |
+| `SUPPLY` | อาหาร / น้ำดื่ม / เสบียง |
 - `description`
 - `peopleCount`
 - `specialNeeds`

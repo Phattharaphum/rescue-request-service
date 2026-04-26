@@ -64,6 +64,30 @@ def list_all_incidents() -> list[dict]:
     return items
 
 
+def delete_all_incidents() -> int:
+    table = _get_table()
+    keys: list[dict[str, str]] = []
+    last_evaluated_key = None
+
+    while True:
+        kwargs: dict[str, Any] = {
+            "ProjectionExpression": "incidentId",
+        }
+        if last_evaluated_key:
+            kwargs["ExclusiveStartKey"] = last_evaluated_key
+        response = table.scan(**kwargs)
+        keys.extend({"incidentId": item["incidentId"]} for item in response.get("Items", []) if item.get("incidentId"))
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+
+    with table.batch_writer() as batch:
+        for key in keys:
+            batch.delete_item(Key=key)
+
+    return len(keys)
+
+
 def list_incidents(limit: int = 20, cursor: str | None = None, status: str | None = None) -> dict:
     kwargs: dict[str, Any] = {
         "IndexName": CATALOG_INDEX_NAME,

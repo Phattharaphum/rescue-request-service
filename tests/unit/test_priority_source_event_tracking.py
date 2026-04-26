@@ -8,6 +8,7 @@ from src.shared.errors import ValidationError
 
 def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch):
     captured_updates: dict = {}
+    captured_publish: dict = {}
 
     monkeypatch.setattr(create_rescue_request, "find_by_phone_hash", lambda _phone_hash: None)
     monkeypatch.setattr(create_rescue_request, "detect_duplicate", lambda **kwargs: None)
@@ -16,12 +17,16 @@ def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch
     monkeypatch.setattr(create_rescue_request, "generate_tracking_code", lambda: "123456")
     monkeypatch.setattr(create_rescue_request, "hash_tracking_code", lambda value: f"track::{value}")
     monkeypatch.setattr(create_rescue_request, "get_duplicate_signature", lambda **kwargs: "dup-signature")
-    monkeypatch.setattr(create_rescue_request, "get_incident", lambda incident_id: {"incidentId": incident_id})
+    monkeypatch.setattr(
+        create_rescue_request,
+        "get_incident",
+        lambda incident_id: {"incidentId": incident_id, "incidentType": "flood"},
+    )
     monkeypatch.setattr(create_rescue_request, "create_rescue_request", lambda **kwargs: None)
     monkeypatch.setattr(
         create_rescue_request,
         "publish_request_created",
-        lambda **kwargs: {
+        lambda **kwargs: captured_publish.update(kwargs) or {
             "messageId": "1f8b9d06-6c3a-4d34-a095-6f34d61d3a81",
             "eventType": "rescue-request.created",
             "occurredAt": "2026-04-18T00:00:00+00:00",
@@ -35,7 +40,7 @@ def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch
 
     result = create_rescue_request.execute({
         "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "description": "Need evacuation",
         "peopleCount": 2,
         "latitude": 13.75,
@@ -51,6 +56,7 @@ def test_create_request_stores_latest_priority_source_event_metadata(monkeypatch
         "latestPrioritySourceEventType": "rescue-request.created",
         "latestPrioritySourceOccurredAt": "2026-04-18T00:00:00+00:00",
     }
+    assert captured_publish["request_data"]["incidentType"] == "flood"
 
 
 def test_create_request_requires_incident_in_catalog(monkeypatch):
@@ -59,7 +65,7 @@ def test_create_request_requires_incident_in_catalog(monkeypatch):
     with pytest.raises(ValidationError) as exc_info:
         create_rescue_request.execute({
             "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "Need evacuation",
             "peopleCount": 2,
             "latitude": 13.75,

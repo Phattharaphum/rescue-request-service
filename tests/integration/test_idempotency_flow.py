@@ -120,7 +120,7 @@ class TestIdempotencyFlow:
     def _create_request(self, description: str = "Idempotency request") -> str:
         body = {
             "incidentId": _new_seeded_incident_id(),
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": description,
             "peopleCount": 2,
             "latitude": 13.7563,
@@ -137,7 +137,7 @@ class TestIdempotencyFlow:
         idem_key = str(uuid.uuid4())
         body = {
             "incidentId": _new_seeded_incident_id(),
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "Idempotency test",
             "peopleCount": 2,
             "latitude": 13.7563,
@@ -161,7 +161,7 @@ class TestIdempotencyFlow:
         idem_key = str(uuid.uuid4())
         body1 = {
             "incidentId": _new_seeded_incident_id(),
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "First payload",
             "peopleCount": 2,
             "latitude": 13.7563,

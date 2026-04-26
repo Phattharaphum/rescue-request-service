@@ -29,7 +29,7 @@ def seed():
         "itemType": "MASTER",
         "requestId": request_id,
         "incidentId": incident_id,
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "description": "Water level rising rapidly, need evacuation",
         "peopleCount": 5,
         "latitude": Decimal("13.7563"),
@@ -93,7 +93,7 @@ def seed():
         "requestId": request_id,
         "incidentId": incident_id,
         "status": "SUBMITTED",
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "submittedAt": now,
     })
 

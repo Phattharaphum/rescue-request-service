@@ -332,7 +332,7 @@ paths:
               $ref: '#/components/schemas/CreateRescueRequestBody'
             example:
               incidentId: "INC-2024-001"
-              requestType: "FLOOD"
+              requestType: "EVACUATION"
               description: "Water level rising rapidly, 5 people trapped on second floor"
               peopleCount: 5
               latitude: 13.7563
@@ -426,7 +426,7 @@ paths:
               example:
                 requestId: "550e8400-e29b-41d4-a716-446655440000"
                 incidentId: "INC-2024-001"
-                requestType: "FLOOD"
+                requestType: "EVACUATION"
                 status: "ASSIGNED"
                 statusMessage: "มีการมอบหมายหน่วยช่วยเหลือแล้ว กรุณาติดตามการอัปเดตล่าสุด"
                 nextSuggestedAction: "เตรียมพร้อมรับการติดต่อจากหน่วยช่วยเหลือ"
@@ -909,7 +909,7 @@ paths:
                   - requestId: "550e8400-e29b-41d4-a716-446655440000"
                     incidentId: "INC-2024-001"
                     status: "ASSIGNED"
-                    requestType: "FLOOD"
+                    requestType: "EVACUATION"
                     description: "Water level rising rapidly, 5 people trapped on second floor"
                     peopleCount: 5
                     specialNeeds: "Elderly person, needs wheelchair"
@@ -1371,18 +1371,18 @@ components:
 
     RequestType:
       type: string
-      description: Type of emergency
+      description: |
+        Type of rescue request.
+
+        Allowed values:
+        - `MEDICAL` - การแพทย์ / ยา / ผู้ป่วยฉุกเฉิน
+        - `EVACUATION` - อพยพออกจากพื้นที่ / ช่วยเหลือฉุกเฉิน / ติดค้าง
+        - `SUPPLY` - อาหาร / น้ำดื่ม / เสบียง
       enum:
-        - FLOOD
-        - FIRE
-        - EARTHQUAKE
-        - LANDSLIDE
-        - STORM
         - MEDICAL
         - EVACUATION
         - SUPPLY
-        - OTHER
-      example: FLOOD
+      example: EVACUATION
 
     UpdateType:
       type: string
@@ -1474,7 +1474,7 @@ components:
           type: string
           nullable: true
           description: Error detail when the check fails
-          example: ResourceNotFoundException: Requested resource not found
+          example: "ResourceNotFoundException: Requested resource not found"
 
     HealthReadinessCheck:
       type: object
@@ -2607,3 +2607,4 @@ components:
             path: "/v1/rescue-requests"
             method: "POST"
             details: []
+

@@ -113,7 +113,7 @@ class TestCreateRequestFlow:
     def test_create_request_success(self):
         body = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "Test flood rescue",
             "peopleCount": 3,
             "latitude": 13.7563,
@@ -159,7 +159,7 @@ class TestCreateRequestFlow:
     def test_create_and_get_request(self):
         body = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FIRE",
+            "requestType": "MEDICAL",
             "description": "Fire rescue needed",
             "peopleCount": 2,
             "latitude": 13.8,
@@ -192,7 +192,7 @@ class TestCreateRequestFlow:
         phone = _random_phone()
         body1 = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "First request",
             "peopleCount": 2,
             "latitude": 13.7563,
@@ -203,7 +203,7 @@ class TestCreateRequestFlow:
         }
         body2 = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FIRE",
+            "requestType": "MEDICAL",
             "description": "Second request with same phone",
             "peopleCount": 1,
             "latitude": 13.7001,
@@ -221,7 +221,7 @@ class TestCreateRequestFlow:
     def test_create_request_rejects_nan_coordinates(self):
         body = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "NaN coordinate request",
             "peopleCount": 1,
             "latitude": float("nan"),
@@ -251,7 +251,7 @@ class TestCreateRequestFlow:
     def test_create_request_rejects_people_count_outside_dynamodb_limit(self):
         body = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "Huge people count",
             "peopleCount": int("9" * 39),
             "latitude": 13.7563,
@@ -266,7 +266,7 @@ class TestCreateRequestFlow:
     def test_create_request_rejects_unknown_incident_id(self):
         body = {
             "incidentId": f"incident-{uuid.uuid4()}",
-            "requestType": "FLOOD",
+            "requestType": "EVACUATION",
             "description": "Unknown incident id",
             "peopleCount": 2,
             "latitude": 13.7563,

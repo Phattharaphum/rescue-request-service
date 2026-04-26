@@ -10,7 +10,7 @@
     "requestId": "e6c084a3-1517-4814-abef-6e5161ec220f",
     "incidentId": "019c774d-1ac5-758b-ae95-5cd4aeb89258",
     "evaluateId": "11111111-2222-3333-4444-555555555556",
-    "requestType": "FLOOD",
+    "requestType": "EVACUATION",
     "priorityScore": 0.92,
     "priorityLevel": "CRITICAL",
     "evaluateReason": "Children and elderly residents require urgent rescue.",

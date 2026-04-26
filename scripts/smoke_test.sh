@@ -9,7 +9,7 @@ RESPONSE=$(curl -s -X POST "$BASE_URL/v1/rescue-requests" \
   -H "Content-Type: application/json" \
   -d '{
     "incidentId": "incident-smoke-001",
-    "requestType": "FLOOD",
+    "requestType": "EVACUATION",
     "description": "Smoke test request",
     "peopleCount": 3,
     "latitude": 13.7563,

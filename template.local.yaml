@@ -18,8 +18,8 @@ Globals:
   Api:
     Cors:
       AllowOrigin: "'*'"
-      AllowHeaders: "'Content-Type,X-Trace-Id,X-Idempotency-Key,If-Match,Authorization'"
-      AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+      AllowHeaders: "'Content-Type,X-Trace-Id,X-Idempotency-Key,If-Match,Authorization,api-key'"
+      AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
 
   Function:
     Runtime: python3.11
@@ -37,6 +37,7 @@ Globals:
         LOG_LEVEL: DEBUG
         DYNAMODB_ENDPOINT: http://localstack:4566
         INCIDENT_SYNC_SECRET_ID: rescue-request-service/incident-tracking/local
+        INTERNAL_API_KEY_SECRET_ID: api-key-rs
         INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS: "30"
 
 Resources:
@@ -44,6 +45,13 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: rescue-request-events-v1
+
+  InternalApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: api-key-rs
+      Description: Local internal maintenance API key for Rescue Request Service
+      SecretString: '{"apiKey":"local-internal-api-key"}'
 
   RescueRequestEventsStreamQueue:
     Type: AWS::SQS::Queue
@@ -167,6 +175,38 @@ Resources:
           Properties:
             Path: /v1/internal/incidents/catalog
             Method: GET
+
+  InternalMaintenanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.maintenance.handler
+      CodeUri: .
+      Events:
+        ClearIncidentCatalog:
+          Type: Api
+          Properties:
+            Path: /v1/internal/incidents/catalog
+            Method: DELETE
+        ClearIncidentCatalogWithRequests:
+          Type: Api
+          Properties:
+            Path: /v1/internal/incidents/catalog/with-requests
+            Method: DELETE
+        DeleteOrphanedRequests:
+          Type: Api
+          Properties:
+            Path: /v1/internal/rescue-requests/orphaned
+            Method: DELETE
+        ClearRequests:
+          Type: Api
+          Properties:
+            Path: /v1/internal/rescue-requests
+            Method: DELETE
+        ClearAllData:
+          Type: Api
+          Properties:
+            Path: /v1/internal/maintenance/all
+            Method: DELETE
 
   CitizenTrackingLookupFunction:
     Type: AWS::Serverless::Function

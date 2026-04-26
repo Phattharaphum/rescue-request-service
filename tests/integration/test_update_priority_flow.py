@@ -102,7 +102,7 @@ def _create_request() -> str:
     _ensure_incident_in_catalog(incident_id)
     body = {
         "incidentId": incident_id,
-        "requestType": "FLOOD",
+        "requestType": "EVACUATION",
         "description": "Priority update integration test",
         "peopleCount": 3,
         "latitude": 13.7563,
