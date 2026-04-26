@@ -1,6 +1,8 @@
 ﻿# API Reference
 
-**Base URL:** `Not available`
+**Base URL:** `https://xiotbtkj2m.execute-api.ap-southeast-2.amazonaws.com/dev/v1`
+
+**Frontend:** `https://rescue-request.phatphum.me/`
 
 A machine-readable OpenAPI 3.0 specification is available at [`docs/openapi.yaml`](openapi.yaml).
 
