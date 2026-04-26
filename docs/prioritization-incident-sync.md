@@ -162,7 +162,7 @@ Inbound result messages must satisfy:
 - `body.description` is present
 - `body.peopleCount` is a positive integer
 - `body.location` exists and contains valid numeric `latitude` and `longitude`
-- `body.specialNeeds`, when present, is an array of non-empty strings
+- `body.specialNeeds`, when present, is accepted as-is and is not shape-validated
 
 ### Correlation Rule
 

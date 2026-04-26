@@ -374,6 +374,41 @@ def test_accepts_special_needs_as_comma_separated_string(monkeypatch):
     assert appended_calls["request_id"] == "req-1"
 
 
+@pytest.mark.parametrize(
+    "special_needs",
+    [
+        {"mobility": "limited", "hasMedication": True},
+        7,
+        ["children", "", 12, None],
+        "",
+    ],
+)
+def test_accepts_special_needs_as_any_shape(monkeypatch, special_needs):
+    appended_calls: dict = {}
+
+    monkeypatch.setattr(usecase, "check_and_reserve", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "get_current_state", lambda request_id: _current_state(request_id))
+    monkeypatch.setattr(
+        usecase,
+        "append_event_and_update_current",
+        lambda request_id, event_item, current_updates, expected_version=None: appended_calls.update({
+            "request_id": request_id,
+            "updates": current_updates,
+        }),
+    )
+    monkeypatch.setattr(usecase, "publish_status_changed", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_success", lambda **kwargs: None)
+    monkeypatch.setattr(usecase, "finalize_failure", lambda **kwargs: None)
+
+    message = _message()
+    message["body"]["specialNeeds"] = special_needs
+
+    result = usecase.execute(message)
+
+    assert result["status"] == "updated"
+    assert appended_calls["request_id"] == "req-1"
+
+
 def test_rejects_legacy_re_evaluate_message_type_on_created_channel():
     with pytest.raises(ValidationError) as exc_info:
         usecase.execute(

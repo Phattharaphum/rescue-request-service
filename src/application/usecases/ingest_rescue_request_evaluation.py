@@ -245,10 +245,6 @@ def _validate_message(header: dict[str, Any], body: dict[str, Any]) -> list[dict
         if not _is_number(location.get("longitude")):
             errors.append({"field": "body.location.longitude", "issue": "must be a valid number"})
 
-    special_needs = body.get("specialNeeds")
-    if special_needs is not None and not _is_string_list(special_needs):
-        errors.append({"field": "body.specialNeeds", "issue": "must be an array of non-empty strings"})
-
     return errors
 
 
@@ -364,12 +360,6 @@ def _non_empty_text(value: Any) -> bool:
 
 def _is_positive_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
-
-
-def _is_string_list(value: Any) -> bool:
-    if not isinstance(value, list):
-        return False
-    return all(_non_empty_text(item) for item in value)
 
 
 def _normalize_special_needs(value: Any) -> Any:
