@@ -1,17 +1,27 @@
 import json
 
+import pytest
+
 from src.adapters.auth import internal_api_key
 from src.application.usecases import internal_maintenance
 from src.handlers.internal import maintenance
 
 
-def test_extracts_internal_api_key_from_json_secret():
-    assert internal_api_key._extract_api_key('{"apiKey":"secret-123"}') == "secret-123"
-    assert internal_api_key._extract_api_key('{"api-key":"secret-456"}') == "secret-456"
+def test_requires_matching_internal_api_key_from_env_config(monkeypatch):
+    monkeypatch.setattr(internal_api_key, "INTERNAL_API_KEY", "secret-123")
+    internal_api_key._load_internal_api_key.cache_clear()
+
+    internal_api_key.require_internal_api_key("secret-123")
 
 
-def test_extracts_internal_api_key_from_plain_secret():
-    assert internal_api_key._extract_api_key("plain-secret") == "plain-secret"
+def test_rejects_wrong_internal_api_key_from_env_config(monkeypatch):
+    monkeypatch.setattr(internal_api_key, "INTERNAL_API_KEY", "secret-123")
+    internal_api_key._load_internal_api_key.cache_clear()
+
+    with pytest.raises(Exception) as exc_info:
+        internal_api_key.require_internal_api_key("wrong")
+
+    assert exc_info.value.__class__.__name__ == "UnauthorizedError"
 
 
 def test_clear_incident_catalog_without_requests(monkeypatch):

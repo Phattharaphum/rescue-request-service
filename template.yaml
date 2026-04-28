@@ -16,9 +16,6 @@ Parameters:
   MissionStatusChangedTopicArn:
     Type: String
     Default: ""
-  InternalApiKeySecretName:
-    Type: String
-    Default: api-key-rs
 
 Conditions:
   HasPrioritizationCreatedTopicArn: !Not [!Equals [!Ref PrioritizationCreatedTopicArn, ""]]
@@ -39,8 +36,11 @@ Globals:
         SNS_TOPIC_ARN: !Ref RescueRequestEventsTopic
         ALLOWED_ORIGINS: https://rescue-request.phatphum.me,http://localhost:3000
         LOG_LEVEL: INFO
-        INCIDENT_SYNC_SECRET_ID: !Ref IncidentTrackingApiSecret
-        INTERNAL_API_KEY_SECRET_ID: !Ref InternalApiKeySecret
+        INCIDENT_SYNC_API_URL: https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1/incidents
+        INCIDENT_SYNC_API_KEY: "123"
+        INCIDENT_SYNC_ACCEPT: application/json
+        INCIDENT_SYNC_TRANSACTION_ID_HEADER: X-IncidentTNX-Id
+        INTERNAL_API_KEY: 6609612160G
         INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS: "30"
 
 Resources:
@@ -125,20 +125,6 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub "rescue-request-events-v1-${Stage}"
-
-  IncidentTrackingApiSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub "rescue-request-service/incident-tracking/${Stage}"
-      Description: Endpoint configuration for syncing incidents from IncidentTracking Service
-      SecretString: '{"apiUrl":"https://incident-service.krittamark.com/api/v1/incidents","apiKey":"REPLACE_ME","accept":"application/json","transactionIdHeader":"X-IncidentTNX-Id"}'
-
-  InternalApiKeySecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Ref InternalApiKeySecretName
-      Description: Internal maintenance API key for Rescue Request Service
-      SecretString: '{"apiKey":"REPLACE_ME"}'
 
   RescueRequestEventsStreamQueue:
     Type: AWS::SQS::Queue
@@ -365,8 +351,6 @@ Resources:
               Action:
                 - dynamodb:Scan
               Resource: !GetAtt IncidentCatalogTable.Arn
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref InternalApiKeySecret
       Events:
         Api:
           Type: Api
@@ -390,8 +374,6 @@ Resources:
               Resource:
                 - !GetAtt IncidentCatalogTable.Arn
                 - !GetAtt RescueRequestTable.Arn
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref InternalApiKeySecret
       Events:
         ClearIncidentCatalog:
           Type: Api
@@ -785,8 +767,6 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref IncidentCatalogTable
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref IncidentTrackingApiSecret
       Events:
         Schedule:
           Type: Schedule
@@ -893,12 +873,6 @@ Outputs:
   MissionStatusChangedQueueArn:
     Description: SQS queue ARN for MissionStatusChanged ingestion
     Value: !GetAtt MissionStatusChangedQueue.Arn
-  IncidentTrackingApiSecretArn:
-    Description: Secrets Manager ARN for IncidentTracking Service configuration
-    Value: !Ref IncidentTrackingApiSecret
-  InternalApiKeySecretArn:
-    Description: Secrets Manager ARN for internal maintenance api-key
-    Value: !Ref InternalApiKeySecret
   StreamServiceSseUrl:
     Description: SSE endpoint for the static frontend
     Value: !Join

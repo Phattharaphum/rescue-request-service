@@ -8,7 +8,7 @@ os.environ["STAGE"] = "local"
 os.environ["DYNAMODB_ENDPOINT"] = "http://localhost:4566"
 os.environ["AWS_REGION"] = "ap-southeast-1"
 os.environ["INCIDENT_CATALOG_TABLE_NAME"] = "IncidentCatalogTable"
-os.environ["INTERNAL_API_KEY_SECRET_ID"] = "api-key-rs"
+os.environ["INTERNAL_API_KEY"] = "test-internal-key"
 os.environ["AWS_ACCESS_KEY_ID"] = "test"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
 
@@ -17,7 +17,6 @@ from src.handlers.internal.list_incident_catalog import handler as internal_list
 
 def _create_tables():
     dynamodb = boto3.client("dynamodb", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
-    secrets = boto3.client("secretsmanager", endpoint_url="http://localhost:4566", region_name="ap-southeast-1")
     tables = dynamodb.list_tables()["TableNames"]
 
     if "IncidentCatalogTable" not in tables:
@@ -31,21 +30,18 @@ def _create_tables():
             KeySchema=[
                 {"AttributeName": "incidentId", "KeyType": "HASH"},
             ],
-            GlobalSecondaryIndexes=[{
-                "IndexName": "CatalogOrderIndex",
-                "KeySchema": [
-                    {"AttributeName": "catalogPartition", "KeyType": "HASH"},
-                    {"AttributeName": "catalogSortKey", "KeyType": "RANGE"},
-                ],
-                "Projection": {"ProjectionType": "ALL"},
-            }],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "CatalogOrderIndex",
+                    "KeySchema": [
+                        {"AttributeName": "catalogPartition", "KeyType": "HASH"},
+                        {"AttributeName": "catalogSortKey", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
-
-    try:
-        secrets.create_secret(Name="api-key-rs", SecretString='{"apiKey":"test-internal-key"}')
-    except secrets.exceptions.ResourceExistsException:
-        secrets.put_secret_value(SecretId="api-key-rs", SecretString='{"apiKey":"test-internal-key"}')
 
 
 @pytest.fixture(scope="module", autouse=True)

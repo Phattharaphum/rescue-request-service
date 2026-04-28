@@ -4,14 +4,12 @@ from functools import lru_cache
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import boto3
-
 from src.shared.config import (
-    AWS_ENDPOINT_URL,
-    AWS_REGION,
+    INCIDENT_SYNC_ACCEPT,
+    INCIDENT_SYNC_API_KEY,
+    INCIDENT_SYNC_API_URL,
     INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS,
-    INCIDENT_SYNC_SECRET_ID,
-    STAGE,
+    INCIDENT_SYNC_TRANSACTION_ID_HEADER,
 )
 from src.shared.errors import ServiceUnavailableError
 from src.shared.logger import get_logger
@@ -19,49 +17,32 @@ from src.shared.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _get_secrets_manager_client():
-    kwargs = {"region_name": AWS_REGION}
-    if STAGE == "local" and AWS_ENDPOINT_URL:
-        kwargs["endpoint_url"] = AWS_ENDPOINT_URL
-    return boto3.client("secretsmanager", **kwargs)
-
-
 @lru_cache(maxsize=1)
-def _load_incident_tracking_secret() -> dict:
-    if not INCIDENT_SYNC_SECRET_ID:
-        raise ServiceUnavailableError("INCIDENT_SYNC_SECRET_ID is not configured")
-
-    response = _get_secrets_manager_client().get_secret_value(SecretId=INCIDENT_SYNC_SECRET_ID)
-    secret_string = response.get("SecretString", "")
-    try:
-        secret = json.loads(secret_string)
-    except json.JSONDecodeError as exc:
-        raise ServiceUnavailableError("Incident tracking secret must be valid JSON") from exc
-
-    api_url = secret.get("apiUrl")
-    api_key = secret.get("apiKey")
-    if not isinstance(api_url, str) or not api_url.strip():
-        raise ServiceUnavailableError("Incident tracking secret is missing apiUrl")
-    if not isinstance(api_key, str) or not api_key.strip():
-        raise ServiceUnavailableError("Incident tracking secret is missing apiKey")
+def _load_incident_tracking_config() -> dict:
+    if not isinstance(INCIDENT_SYNC_API_URL, str) or not INCIDENT_SYNC_API_URL.strip():
+        raise ServiceUnavailableError("INCIDENT_SYNC_API_URL is not configured")
+    if not isinstance(INCIDENT_SYNC_API_KEY, str) or not INCIDENT_SYNC_API_KEY.strip():
+        raise ServiceUnavailableError("INCIDENT_SYNC_API_KEY is not configured")
 
     return {
-        "apiUrl": api_url.strip(),
-        "apiKey": api_key.strip(),
-        "accept": secret.get("accept", "application/json"),
-        "transactionIdHeader": secret.get("transactionIdHeader", "X-IncidentTNX-Id"),
+        "apiUrl": INCIDENT_SYNC_API_URL.strip(),
+        "apiKey": INCIDENT_SYNC_API_KEY.strip(),
+        "accept": INCIDENT_SYNC_ACCEPT.strip() if INCIDENT_SYNC_ACCEPT else "application/json",
+        "transactionIdHeader": (
+            INCIDENT_SYNC_TRANSACTION_ID_HEADER.strip() if INCIDENT_SYNC_TRANSACTION_ID_HEADER else "X-IncidentTNX-Id"
+        ),
     }
 
 
 def fetch_incidents() -> list[dict]:
-    secret = _load_incident_tracking_secret()
+    config = _load_incident_tracking_config()
     transaction_id = str(uuid.uuid4())
     request = Request(
-        url=secret["apiUrl"],
+        url=config["apiUrl"],
         headers={
-            "Accept": secret["accept"],
-            "api-key": secret["apiKey"],
-            secret["transactionIdHeader"]: transaction_id,
+            "Accept": config["accept"],
+            "api-key": config["apiKey"],
+            config["transactionIdHeader"]: transaction_id,
         },
         method="GET",
     )
@@ -70,11 +51,11 @@ def fetch_incidents() -> list[dict]:
         "Calling IncidentTracking Service",
         extra={
             "extra_data": {
-                "url": secret["apiUrl"],
+                "url": config["apiUrl"],
                 "method": "GET",
                 "timeoutSeconds": INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS,
-                "accept": secret["accept"],
-                "transactionIdHeader": secret["transactionIdHeader"],
+                "accept": config["accept"],
+                "transactionIdHeader": config["transactionIdHeader"],
                 "transactionId": transaction_id,
             }
         },

@@ -8,12 +8,8 @@
 api-key: <internal api key>
 ```
 
-ค่า `api-key` จะถูกเทียบกับค่าใน AWS Secrets Manager secret `api-key-rs`
-โดย secret รองรับได้ทั้งรูปแบบ plain text และ JSON:
-
-```json
-{ "apiKey": "REPLACE_ME" }
-```
+ค่า `api-key` จะถูกเทียบกับค่าใน environment variable `INTERNAL_API_KEY`
+ซึ่งตอนนี้ตั้งค่าไว้ใน SAM template เป็น `6609612160G`
 
 ถ้า header หายไปหรือค่าไม่ตรง ระบบจะตอบ `401 UNAUTHORIZED`
 
@@ -23,13 +19,12 @@ Lambda ใช้ environment variable:
 
 | Name | Value |
 |---|---|
-| `INTERNAL_API_KEY_SECRET_ID` | Secret id หรือ ARN ของ internal api key secret |
+| `INTERNAL_API_KEY` | Internal maintenance API key |
 
 ใน SAM template มี resource:
 
 | Resource | Purpose |
 |---|---|
-| `InternalApiKeySecret` | สร้าง Secrets Manager secret ชื่อ `api-key-rs` |
 | `InternalListIncidentCatalogFunction` | อ่าน IncidentCatalog แบบ internal |
 | `InternalMaintenanceFunction` | ลบ IncidentCatalog และ/หรือ RescueRequest data |
 
@@ -146,8 +141,8 @@ Internal functions ใช้ least-privilege IAM:
 
 | Function | Permission |
 |---|---|
-| `InternalListIncidentCatalogFunction` | `dynamodb:Scan` เฉพาะ `IncidentCatalogTable`, `secretsmanager:GetSecretValue` เฉพาะ `InternalApiKeySecret` |
-| `InternalMaintenanceFunction` | `dynamodb:Scan`, `dynamodb:BatchWriteItem`, `dynamodb:DeleteItem` เฉพาะ `IncidentCatalogTable` และ `RescueRequestTable`, `secretsmanager:GetSecretValue` เฉพาะ `InternalApiKeySecret` |
+| `InternalListIncidentCatalogFunction` | `dynamodb:Scan` เฉพาะ `IncidentCatalogTable` |
+| `InternalMaintenanceFunction` | `dynamodb:Scan`, `dynamodb:BatchWriteItem`, `dynamodb:DeleteItem` เฉพาะ `IncidentCatalogTable` และ `RescueRequestTable` |
 
 ## cURL Examples
 

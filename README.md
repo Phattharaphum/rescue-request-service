@@ -25,6 +25,7 @@ This service provides a REST API for:
 - [DOCS](./DOCS.md)
 - [Data Model](./docs/data-model.md)
 - [Prioritization + Incident Sync](./docs/prioritization-incident-sync.md)
+- [No Secrets Manager Config Change](./docs/no-secrets-manager-config.md)
 - [Frontend Repository](https://github.com/Phattharaphum/rescue-request-service-frontend)
 
 ## Table of Contents
@@ -41,7 +42,7 @@ This service provides a REST API for:
 10. [Invoke Lambda Locally](#invoke-lambda-locally)
 11. [Incident Catalog Sync Test Setup](#incident-catalog-sync-test-setup)
 12. [Prioritization Result Ingest Test Setup](#prioritization-result-ingest-test-setup)
-13. [Secrets Manager Commands (LocalStack)](#secrets-manager-commands-localstack)
+13. [Environment Configuration](#environment-configuration)
 14. [Local Validation and Deploy-Parity Checklist](#local-validation-and-deploy-parity-checklist)
 15. [Deploy to AWS (SAM Package + CloudFormation)](#deploy-to-aws-sam-package--cloudformation)
 16. [Quick API Smoke Test (Local)](#quick-api-smoke-test-local)
@@ -55,7 +56,7 @@ This service provides a REST API for:
 - Compute: AWS Lambda (Python 3.11)
 - Database: DynamoDB (`RescueRequestTable`, `IdempotencyTable`, `IncidentCatalogTable`)
 - Messaging: SNS + SQS
-- Secrets: AWS Secrets Manager (for IncidentTracking config)
+- Config: Lambda environment variables (IncidentTracking and internal api-key)
 - IaC: AWS SAM / CloudFormation
 - Local runtime: SAM CLI + LocalStack
 
@@ -115,7 +116,6 @@ LocalStack services enabled by `local/docker-compose.yml`:
 - `dynamodb`
 - `sns`
 - `sqs`
-- `secretsmanager`
 - `events`
 - `cloudwatch`
 - `logs`
@@ -141,7 +141,11 @@ Current `.env.json` example:
     "INCIDENT_CATALOG_TABLE_NAME": "IncidentCatalogTable",
     "PRIORITIZATION_COMMANDS_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:000000000000:rescue-prioritization-commands-v1",
     "PRIORITIZATION_REEVALUATE_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:000000000000:rescue-prioritization-updated-v1",
-    "INCIDENT_SYNC_SECRET_ID": "rescue-request-service/incident-tracking/local",
+    "INCIDENT_SYNC_API_URL": "https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1/incidents",
+    "INCIDENT_SYNC_API_KEY": "123",
+    "INCIDENT_SYNC_ACCEPT": "application/json",
+    "INCIDENT_SYNC_TRANSACTION_ID_HEADER": "X-IncidentTNX-Id",
+    "INTERNAL_API_KEY": "6609612160G",
     "INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS": "30"
   }
 }
@@ -164,7 +168,7 @@ make local-db-start
 ```
 
 This starts LocalStack with enabled services:
-- `dynamodb`, `sns`, `sqs`, `secretsmanager`, `events`, `cloudwatch`, `logs`
+- `dynamodb`, `sns`, `sqs`, `events`, `cloudwatch`, `logs`
 
 This also creates/updates DynamoDB tables:
 - `RescueRequestTable`
@@ -179,10 +183,10 @@ This also bootstraps SNS/SQS resources and subscriptions:
 - SNS subscriptions: `rescue-prioritization-updated-v1` -> `rescue-prioritization-evaluated`
 - SNS subscriptions: `mission-status-changed-v1` -> `rescue-mission-status-changed`
 
-This also bootstraps Secrets Manager:
-- `rescue-request-service/incident-tracking/local` (or value from `INCIDENT_SYNC_SECRET_ID`)
+IncidentTracking and internal api-key configuration now comes from Lambda environment variables
+in `template.yaml`, `template.local.yaml`, `.env`, and `.env.json`.
 
-Optional: re-run only messaging + secrets bootstrap without recreating tables:
+Optional: re-run only messaging bootstrap without recreating tables:
 
 ### bash
 
@@ -710,73 +714,19 @@ sam local invoke SyncIncidentCatalogFunction `
 
 This flow verifies end-to-end IncidentTracking integration in local runtime.
 
-### Step 1: Create or update local secret for incident sync
+### Step 1: Confirm incident sync environment variables
 
-Secret name expected by code:
-- `rescue-request-service/incident-tracking/local`
+IncidentTracking config is read directly from Lambda environment variables:
+
+| Variable | Current local value |
+|---|---|
+| `INCIDENT_SYNC_API_URL` | `https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1/incidents` |
+| `INCIDENT_SYNC_API_KEY` | `123` |
+| `INCIDENT_SYNC_ACCEPT` | `application/json` |
+| `INCIDENT_SYNC_TRANSACTION_ID_HEADER` | `X-IncidentTNX-Id` |
 
 Important for local invoke:
 - If IncidentTracking Service runs on your host machine, use `http://host.docker.internal:3000/api/v1/incidents` (not `http://localhost:3000/...`) because Lambda runs inside a Docker container.
-
-### bash
-
-```bash
-aws secretsmanager create-secret \
-  --endpoint-url http://localhost:4566 \
-  --region ap-southeast-1 \
-  --name rescue-request-service/incident-tracking/local \
-  --secret-string '{"apiUrl":"https://incident-service.krittamark.com/api/v1/incidents","apiKey":"<YOUR_API_KEY>","accept":"application/json","transactionIdHeader":"X-IncidentTNX-Id"}'
-```
-
-If the secret already exists:
-
-```bash
-aws secretsmanager put-secret-value \
-  --endpoint-url http://localhost:4566 \
-  --region ap-southeast-1 \
-  --secret-id rescue-request-service/incident-tracking/local \
-  --secret-string '{"apiUrl":"https://incident-service.krittamark.com/api/v1/incidents","apiKey":"<YOUR_API_KEY>","accept":"application/json","transactionIdHeader":"X-IncidentTNX-Id"}'
-```
-
-### PowerShell
-
-```powershell
-$secretPayload = @{
-  apiUrl = "http://host.docker.internal:3000/api/v1/incidents"
-  apiKey = "<YOUR_API_KEY>"
-  accept = "application/json"
-  transactionIdHeader = "X-IncidentTNX-Id"
-} | ConvertTo-Json -Compress
-
-$secretFile = Join-Path $PWD "tmp.incident-secret.json"
-Set-Content -Path $secretFile -Value $secretPayload -NoNewline
-
-aws secretsmanager create-secret `
-  --endpoint-url http://localhost:4566 `
-  --region ap-southeast-1 `
-  --name rescue-request-service/incident-tracking/local `
-  --secret-string file://$secretFile
-```
-
-If the secret already exists:
-
-```powershell
-$secretPayload = @{
-  apiUrl = "http://host.docker.internal:3000/api/v1/incidents"
-  apiKey = "<YOUR_API_KEY>"
-  accept = "application/json"
-  transactionIdHeader = "X-IncidentTNX-Id"
-} | ConvertTo-Json -Compress
-
-$secretFile = Join-Path $PWD "tmp.incident-secret.json"
-Set-Content -Path $secretFile -Value $secretPayload -NoNewline
-
-aws secretsmanager put-secret-value `
-  --endpoint-url http://localhost:4566 `
-  --region ap-southeast-1 `
-  --secret-id rescue-request-service/incident-tracking/local `
-  --secret-string file://$secretFile
-```
 
 ### Step 2: Trigger sync Lambda to call IncidentTracking Service
 
@@ -1042,86 +992,26 @@ aws dynamodb get-item `
   --query "Item.{status:status.S,priorityScore:priorityScore.N,priorityLevel:priorityLevel.S,latestPriorityEvaluationId:latestPriorityEvaluationId.S,lastPriorityIngestedAt:lastPriorityIngestedAt.S}"
 ```
 
-## Secrets Manager Commands (LocalStack)
+## Environment Configuration
 
-### List secrets
+Secrets Manager is not used by this project anymore. Runtime configuration is injected
+through SAM/Lambda environment variables.
 
-### bash
+| Variable | Purpose | Current value |
+|---|---|---|
+| `INCIDENT_SYNC_API_URL` | IncidentTracking Service URL | `https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1/incidents` |
+| `INCIDENT_SYNC_API_KEY` | API key sent as `api-key` | `123` |
+| `INCIDENT_SYNC_ACCEPT` | `Accept` header | `application/json` |
+| `INCIDENT_SYNC_TRANSACTION_ID_HEADER` | Transaction id header name | `X-IncidentTNX-Id` |
+| `INTERNAL_API_KEY` | Internal maintenance API key | `6609612160G` |
 
-```bash
-aws secretsmanager list-secrets --endpoint-url http://localhost:4566 --region ap-southeast-1
-```
+The same values are defined in:
 
-### PowerShell
-
-```powershell
-aws secretsmanager list-secrets --endpoint-url http://localhost:4566 --region ap-southeast-1
-```
-
-### Get secret value
-
-### bash
-
-```bash
-aws secretsmanager get-secret-value --endpoint-url http://localhost:4566 --region ap-southeast-1 --secret-id rescue-request-service/incident-tracking/local
-```
-
-### PowerShell
-
-```powershell
-aws secretsmanager get-secret-value --endpoint-url http://localhost:4566 --region ap-southeast-1 --secret-id rescue-request-service/incident-tracking/local
-```
-
-### Update secret value
-
-### bash
-
-```bash
-aws secretsmanager put-secret-value \
-  --endpoint-url http://localhost:4566 \
-  --region ap-southeast-1 \
-  --secret-id rescue-request-service/incident-tracking/local \
-  --secret-string '{"apiUrl":"https://incident-service.krittamark.com/api/v1/incidents","apiKey":"<YOUR_API_KEY>","accept":"application/json","transactionIdHeader":"X-IncidentTNX-Id"}'
-```
-
-### PowerShell
-
-```powershell
-$secretPayload = @{
-  apiUrl = "https://incident-service.krittamark.com/api/v1/incidents"
-  apiKey = "<YOUR_API_KEY>"
-  accept = "application/json"
-  transactionIdHeader = "X-IncidentTNX-Id"
-} | ConvertTo-Json -Compress
-
-aws secretsmanager put-secret-value `
-  --endpoint-url http://localhost:4566 `
-  --region ap-southeast-1 `
-  --secret-id rescue-request-service/incident-tracking/local `
-  --secret-string $secretPayload
-```
-
-### Delete secret in LocalStack
-
-### bash
-
-```bash
-aws secretsmanager delete-secret \
-  --endpoint-url http://localhost:4566 \
-  --region ap-southeast-1 \
-  --secret-id rescue-request-service/incident-tracking/local \
-  --force-delete-without-recovery
-```
-
-### PowerShell
-
-```powershell
-aws secretsmanager delete-secret `
-  --endpoint-url http://localhost:4566 `
-  --region ap-southeast-1 `
-  --secret-id rescue-request-service/incident-tracking/local `
-  --force-delete-without-recovery
-```
+- `template.yaml`
+- `template.local.yaml`
+- `.env`
+- `.env.example`
+- `.env.json`
 
 ## Local Validation and Deploy-Parity Checklist
 
@@ -1190,7 +1080,6 @@ curl http://localhost:4566/_localstack/health
 aws dynamodb list-tables --endpoint-url http://localhost:4566 --region ap-southeast-1
 aws sns list-topics --endpoint-url http://localhost:4566 --region ap-southeast-1
 aws sqs list-queues --endpoint-url http://localhost:4566 --region ap-southeast-1
-aws secretsmanager list-secrets --endpoint-url http://localhost:4566 --region ap-southeast-1
 aws events list-rules --endpoint-url http://localhost:4566 --region ap-southeast-1
 ```
 
@@ -1201,7 +1090,6 @@ Invoke-RestMethod -Uri http://localhost:4566/_localstack/health -Method Get
 aws dynamodb list-tables --endpoint-url http://localhost:4566 --region ap-southeast-1
 aws sns list-topics --endpoint-url http://localhost:4566 --region ap-southeast-1
 aws sqs list-queues --endpoint-url http://localhost:4566 --region ap-southeast-1
-aws secretsmanager list-secrets --endpoint-url http://localhost:4566 --region ap-southeast-1
 aws events list-rules --endpoint-url http://localhost:4566 --region ap-southeast-1
 ```
 
@@ -1486,14 +1374,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:3000/v1/health" -Method Get
 - If tables are missing, run `make local-db-start` and check with `aws dynamodb list-tables --endpoint-url http://localhost:4566 --region ap-southeast-1`.
 - If `SNS_TOPIC_ARN not set`, create the topic and ensure `.env` and `.env.json` match the same ARN.
 - If ingest validation fails, verify message fields and especially `header.correlationId` equals `latestPrioritySourceEventId` in the current DynamoDB item.
-- If incident sync fails with secret errors, verify the secret exists and contains valid JSON with required keys `apiUrl` and `apiKey`.
-- If sync fails with `Incident tracking secret must be valid JSON`, inspect current value using `aws secretsmanager get-secret-value --endpoint-url http://localhost:4566 --region ap-southeast-1 --secret-id rescue-request-service/incident-tracking/local --query SecretString --output text` and rewrite with valid JSON.
-- If sync fails with `IncidentTracking Service is unreachable` and your incident service runs on host machine, set secret `apiUrl` to `http://host.docker.internal:3000/api/v1/incidents` instead of `http://localhost:3000/...`.
+- If incident sync fails with config errors, verify `INCIDENT_SYNC_API_URL` and `INCIDENT_SYNC_API_KEY` in `template.yaml`, `template.local.yaml`, and `.env.json`.
+- If sync fails with `IncidentTracking Service is unreachable` and your incident service runs on host machine, set `INCIDENT_SYNC_API_URL` to `http://host.docker.internal:3000/api/v1/incidents` instead of `http://localhost:3000/...`.
 - If AWS CLI returns `Unable to locate credentials` in local mode, set `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_DEFAULT_REGION=ap-southeast-1` before running commands.
-- If you get `Service 'secretsmanager' is not enabled`, recreate LocalStack after pulling latest compose config:
-  - `make local-db-stop`
-  - `make local-db-start`
-  - verify with `aws secretsmanager list-secrets --endpoint-url http://localhost:4566 --region ap-southeast-1`
 - If Docker/LocalStack is unavailable, check `docker ps` and restart Docker Desktop.
 
 ### Deployment

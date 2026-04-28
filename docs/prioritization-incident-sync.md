@@ -317,32 +317,17 @@ Idempotency is keyed by:
 - EventBridge schedule: `rate(30 minutes)`
 - Lambda timeout: `30` seconds
 
-### Secret Configuration
+### Environment Configuration
 
-Secret name:
+Incident sync no longer reads AWS Secrets Manager. The Lambda reads these environment variables:
 
-- `rescue-request-service/incident-tracking/{stage}`
-
-Expected JSON:
-
-```json
-{
-  "apiUrl": "https://incident-service.krittamark.com/api/v1/incidents",
-  "apiKey": "REPLACE_ME",
-  "accept": "application/json",
-  "transactionIdHeader": "X-IncidentTNX-Id"
-}
-```
-
-Required keys:
-
-- `apiUrl`
-- `apiKey`
-
-Optional keys:
-
-- `accept`
-- `transactionIdHeader`
+| Variable | Value |
+|----------|-------|
+| `INCIDENT_SYNC_API_URL` | `https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1/incidents` |
+| `INCIDENT_SYNC_API_KEY` | `123` |
+| `INCIDENT_SYNC_ACCEPT` | `application/json` |
+| `INCIDENT_SYNC_TRANSACTION_ID_HEADER` | `X-IncidentTNX-Id` |
+| `INCIDENT_SYNC_HTTP_TIMEOUT_SECONDS` | `30` |
 
 ### Stored Fields
 
@@ -386,7 +371,6 @@ Relevant outputs:
 - `RescuePrioritizationEvaluatedQueueArn`
 - `MissionStatusChangedQueueUrl`
 - `MissionStatusChangedQueueArn`
-- `IncidentTrackingApiSecretArn`
 
 ## Local Development
 
@@ -424,15 +408,10 @@ aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-
 aws sqs get-queue-url --endpoint-url http://localhost:4566 --region ap-southeast-1 --queue-name rescue-mission-status-changed
 ```
 
-### Local Secret
+### Local Environment
 
-```powershell
-aws secretsmanager create-secret `
-  --endpoint-url http://localhost:4566 `
-  --region ap-southeast-1 `
-  --name rescue-request-service/incident-tracking/local `
-  --secret-string "{\"apiUrl\":\"https://incident-service.krittamark.com/api/v1/incidents\",\"apiKey\":\"123\",\"accept\":\"application/json\",\"transactionIdHeader\":\"X-IncidentTNX-Id\"}"
-```
+Local invoke reads IncidentTracking config from `.env.json` and `template.local.yaml`.
+No local Secrets Manager resource is required.
 
 ### SAM Local
 

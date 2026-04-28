@@ -9,7 +9,7 @@ services:
     ports:
       - "4566:4566"
     environment:
-      - SERVICES=dynamodb,sns,sqs,secretsmanager,events,cloudwatch,logs
+      - SERVICES=dynamodb,sns,sqs,events,cloudwatch,logs
       - AWS_DEFAULT_REGION=ap-southeast-1
     networks:
       - rescue-net

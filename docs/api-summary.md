@@ -1730,9 +1730,11 @@ Incident data is synchronized from IncidentTracking Service into local `Incident
 | Trigger | EventBridge schedule `rate(30 minutes)` |
 | Lambda timeout | 30 seconds |
 | External HTTP timeout | 30 seconds |
-| Secret source | AWS Secrets Manager `rescue-request-service/incident-tracking/{stage}` |
-| Required secret keys | `apiUrl`, `apiKey` |
-| Optional secret keys | `accept`, `transactionIdHeader` |
+| Config source | Lambda environment variables |
+| API URL | `INCIDENT_SYNC_API_URL=https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1/incidents` |
+| API key | `INCIDENT_SYNC_API_KEY=123` |
+| Accept header | `INCIDENT_SYNC_ACCEPT=application/json` |
+| Transaction id header | `INCIDENT_SYNC_TRANSACTION_ID_HEADER=X-IncidentTNX-Id` |
 
 Client read behavior:
 
