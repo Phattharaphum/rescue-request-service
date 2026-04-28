@@ -1,0 +1,29 @@
+{
+  "Records": [
+    {
+      "messageId": "mission-status-record-1",
+      "receiptHandle": "local",
+      "body": "{\"schema_version\":\"1.0\",\"mission_id\":\"mission-123\",\"requestId\":\"REPLACE_WITH_REQUEST_ID\",\"incident_id\":\"REPLACE_WITH_INCIDENT_ID\",\"rescue_team_id\":\"team-alpha\",\"old_status\":\"ASSIGNED\",\"new_status\":\"EN_ROUTE\",\"changed_at\":\"2026-04-29T00:04:00+00:00\",\"changed_by\":\"team-alpha\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1777392240000",
+        "SenderId": "local",
+        "ApproximateFirstReceiveTimestamp": "1777392240000"
+      },
+      "messageAttributes": {
+        "messageType": {
+          "stringValue": "MissionStatusChanged",
+          "dataType": "String"
+        },
+        "schemaVersion": {
+          "stringValue": "1.0",
+          "dataType": "String"
+        }
+      },
+      "md5OfBody": "local",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:ap-southeast-1:000000000000:rescue-mission-status-changed",
+      "awsRegion": "ap-southeast-1"
+    }
+  ]
+}

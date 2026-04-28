@@ -13,6 +13,9 @@ Parameters:
   PrioritizationUpdatedTopicArn:
     Type: String
     Default: ""
+  MissionStatusChangedTopicArn:
+    Type: String
+    Default: ""
   InternalApiKeySecretName:
     Type: String
     Default: api-key-rs
@@ -20,6 +23,7 @@ Parameters:
 Conditions:
   HasPrioritizationCreatedTopicArn: !Not [!Equals [!Ref PrioritizationCreatedTopicArn, ""]]
   HasPrioritizationUpdatedTopicArn: !Not [!Equals [!Ref PrioritizationUpdatedTopicArn, ""]]
+  HasMissionStatusChangedTopicArn: !Not [!Equals [!Ref MissionStatusChangedTopicArn, ""]]
 
 Globals:
   Function:
@@ -225,6 +229,48 @@ Resources:
       TopicArn: !Ref PrioritizationUpdatedTopicArn
       Protocol: sqs
       Endpoint: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+
+  MissionStatusChangedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "rescue-mission-status-changed-dlq-${Stage}"
+
+  MissionStatusChangedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "rescue-mission-status-changed-${Stage}"
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MissionStatusChangedDlq.Arn
+        maxReceiveCount: 3
+
+  MissionStatusChangedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MissionStatusChangedQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowMissionStatusChangedTopicPublish
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt MissionStatusChangedQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !If
+                  - HasMissionStatusChangedTopicArn
+                  - !Ref MissionStatusChangedTopicArn
+                  - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:mission-status-changed-v1*"
+
+  MissionStatusChangedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasMissionStatusChangedTopicArn
+    Properties:
+      TopicArn: !Ref MissionStatusChangedTopicArn
+      Protocol: sqs
+      Endpoint: !GetAtt MissionStatusChangedQueue.Arn
 
   # API Gateway
   RescueRequestApi:
@@ -709,6 +755,27 @@ Resources:
             FunctionResponseTypes:
               - ReportBatchItemFailures
 
+  IngestMissionStatusChangedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.ingest_mission_status_changed.handler
+      CodeUri: .
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RescueRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RescueRequestEventsTopic.TopicName
+      Events:
+        MissionStatusChangedQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MissionStatusChangedQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
   SyncIncidentCatalogFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -820,6 +887,12 @@ Outputs:
   RescuePrioritizationEvaluatedQueueArn:
     Description: SQS queue ARN for RescueRequestEvaluatedEvent ingestion
     Value: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+  MissionStatusChangedQueueUrl:
+    Description: SQS queue URL for MissionStatusChanged ingestion
+    Value: !Ref MissionStatusChangedQueue
+  MissionStatusChangedQueueArn:
+    Description: SQS queue ARN for MissionStatusChanged ingestion
+    Value: !GetAtt MissionStatusChangedQueue.Arn
   IncidentTrackingApiSecretArn:
     Description: Secrets Manager ARN for IncidentTracking Service configuration
     Value: !Ref IncidentTrackingApiSecret

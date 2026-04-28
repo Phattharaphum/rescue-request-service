@@ -372,6 +372,19 @@ $priorQueueUrl = Ensure-Queue -QueueName "rescue-prioritization-evaluated" -Attr
 }
 $priorQueueArn = Get-QueueArn -QueueUrl $priorQueueUrl
 
+$missionStatusTopicArn = Ensure-Topic -TopicName "mission-status-changed-v1"
+$missionStatusDlqUrl = Ensure-Queue -QueueName "rescue-mission-status-changed-dlq"
+$missionStatusDlqArn = Get-QueueArn -QueueUrl $missionStatusDlqUrl
+$missionStatusRedrivePolicy = @{
+  deadLetterTargetArn = $missionStatusDlqArn
+  maxReceiveCount = "3"
+} | ConvertTo-Json -Compress
+$missionStatusQueueUrl = Ensure-Queue -QueueName "rescue-mission-status-changed" -Attributes @{
+  VisibilityTimeout = "60"
+  RedrivePolicy = $missionStatusRedrivePolicy
+}
+$missionStatusQueueArn = Get-QueueArn -QueueUrl $missionStatusQueueUrl
+
 $eventsQueuePolicy = @{
   Version = "2012-10-17"
   Statement = @(
@@ -425,6 +438,26 @@ Set-QueuePolicy -QueueUrl $priorQueueUrl -Policy $priorQueuePolicy
 Ensure-SnsSubscription -TopicArn $priorCreatedTopicArn -QueueArn $priorQueueArn
 Ensure-SnsSubscription -TopicArn $priorUpdatedTopicArn -QueueArn $priorQueueArn
 
+$missionStatusQueuePolicy = @{
+  Version = "2012-10-17"
+  Statement = @(
+    @{
+      Sid = "AllowMissionStatusChangedTopicPublish"
+      Effect = "Allow"
+      Principal = "*"
+      Action = "sqs:SendMessage"
+      Resource = $missionStatusQueueArn
+      Condition = @{
+        ArnEquals = @{
+          "aws:SourceArn" = $missionStatusTopicArn
+        }
+      }
+    }
+  )
+}
+Set-QueuePolicy -QueueUrl $missionStatusQueueUrl -Policy $missionStatusQueuePolicy
+Ensure-SnsSubscription -TopicArn $missionStatusTopicArn -QueueArn $missionStatusQueueArn
+
 Write-Host "Bootstrapping incident sync secret..."
 Ensure-IncidentSyncSecret
 Write-Host "Bootstrapping internal api-key secret..."
@@ -438,5 +471,8 @@ Write-Host "  rescue-prioritization-created-v1 => $priorCreatedTopicArn"
 Write-Host "  rescue-prioritization-updated-v1 => $priorUpdatedTopicArn"
 Write-Host "  rescue-prioritization-evaluated => $priorQueueUrl"
 Write-Host "  rescue-prioritization-evaluated-dlq => $priorDlqUrl"
+Write-Host "  mission-status-changed-v1 => $missionStatusTopicArn"
+Write-Host "  rescue-mission-status-changed => $missionStatusQueueUrl"
+Write-Host "  rescue-mission-status-changed-dlq => $missionStatusDlqUrl"
 Write-Host "  incident secret => $incidentSyncSecretName"
 Write-Host "  internal api-key secret => $internalApiKeySecretName"

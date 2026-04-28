@@ -16,6 +16,7 @@ This service provides a REST API for:
 - managing staff workflows (`triage -> assign -> start -> resolve/cancel`)
 - publishing domain events to SNS
 - ingesting prioritization results from SQS
+- ingesting Mission Progress status changes from SQS
 - syncing incident catalog data from IncidentTracking Service
 
 ## Useful Links
@@ -171,11 +172,12 @@ This also creates/updates DynamoDB tables:
 - `IncidentCatalogTable`
 
 This also bootstraps SNS/SQS resources and subscriptions:
-- SNS topics: `rescue-request-events-v1`, `rescue-prioritization-created-v1`, `rescue-prioritization-updated-v1`
-- SQS queues: `rescue-request-events-v1-stream`, `rescue-prioritization-evaluated`, `rescue-prioritization-evaluated-dlq`
+- SNS topics: `rescue-request-events-v1`, `rescue-prioritization-created-v1`, `rescue-prioritization-updated-v1`, `mission-status-changed-v1`
+- SQS queues: `rescue-request-events-v1-stream`, `rescue-prioritization-evaluated`, `rescue-prioritization-evaluated-dlq`, `rescue-mission-status-changed`, `rescue-mission-status-changed-dlq`
 - SNS subscriptions: `rescue-request-events-v1` -> `rescue-request-events-v1-stream`
 - SNS subscriptions: `rescue-prioritization-created-v1` -> `rescue-prioritization-evaluated`
 - SNS subscriptions: `rescue-prioritization-updated-v1` -> `rescue-prioritization-evaluated`
+- SNS subscriptions: `mission-status-changed-v1` -> `rescue-mission-status-changed`
 
 This also bootstraps Secrets Manager:
 - `rescue-request-service/incident-tracking/local` (or value from `INCIDENT_SYNC_SECRET_ID`)
@@ -254,6 +256,9 @@ make local-stop
 | Prioritization DLQ | `rescue-prioritization-evaluated-dlq` | `rescue-prioritization-evaluated-dlq-{stage}` |
 | External prioritization created topic | `rescue-prioritization-created-v1` | external |
 | External prioritization updated topic | `rescue-prioritization-updated-v1` | external |
+| Mission status changed queue | `rescue-mission-status-changed` | `rescue-mission-status-changed-{stage}` |
+| Mission status changed DLQ | `rescue-mission-status-changed-dlq` | `rescue-mission-status-changed-dlq-{stage}` |
+| External mission status topic | `mission-status-changed-v1` | external |
 
 ### Manual create local SNS/SQS resources (optional)
 
@@ -269,10 +274,13 @@ REGION=ap-southeast-1
 EVENTS_TOPIC_ARN=$(aws sns create-topic --endpoint-url "$ENDPOINT" --region "$REGION" --name rescue-request-events-v1 --query TopicArn --output text)
 PRIOR_CREATED_TOPIC_ARN=$(aws sns create-topic --endpoint-url "$ENDPOINT" --region "$REGION" --name rescue-prioritization-created-v1 --query TopicArn --output text)
 PRIOR_UPDATED_TOPIC_ARN=$(aws sns create-topic --endpoint-url "$ENDPOINT" --region "$REGION" --name rescue-prioritization-updated-v1 --query TopicArn --output text)
+MISSION_STATUS_TOPIC_ARN=$(aws sns create-topic --endpoint-url "$ENDPOINT" --region "$REGION" --name mission-status-changed-v1 --query TopicArn --output text)
 
 STREAM_QUEUE_URL=$(aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name rescue-request-events-v1-stream --query QueueUrl --output text)
 PRIOR_DLQ_URL=$(aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name rescue-prioritization-evaluated-dlq --query QueueUrl --output text)
 PRIOR_DLQ_ARN=$(aws sqs get-queue-attributes --endpoint-url "$ENDPOINT" --region "$REGION" --queue-url "$PRIOR_DLQ_URL" --attribute-names QueueArn --query Attributes.QueueArn --output text)
+MISSION_STATUS_DLQ_URL=$(aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name rescue-mission-status-changed-dlq --query QueueUrl --output text)
+MISSION_STATUS_DLQ_ARN=$(aws sqs get-queue-attributes --endpoint-url "$ENDPOINT" --region "$REGION" --queue-url "$MISSION_STATUS_DLQ_URL" --attribute-names QueueArn --query Attributes.QueueArn --output text)
 
 PRIOR_QUEUE_URL=$(aws sqs create-queue \
   --endpoint-url "$ENDPOINT" \
@@ -280,13 +288,22 @@ PRIOR_QUEUE_URL=$(aws sqs create-queue \
   --queue-name rescue-prioritization-evaluated \
   --attributes RedrivePolicy="{\"deadLetterTargetArn\":\"$PRIOR_DLQ_ARN\",\"maxReceiveCount\":\"3\"}" \
   --query QueueUrl --output text)
+MISSION_STATUS_QUEUE_URL=$(aws sqs create-queue \
+  --endpoint-url "$ENDPOINT" \
+  --region "$REGION" \
+  --queue-name rescue-mission-status-changed \
+  --attributes RedrivePolicy="{\"deadLetterTargetArn\":\"$MISSION_STATUS_DLQ_ARN\",\"maxReceiveCount\":\"3\"}" \
+  --query QueueUrl --output text)
 
 echo "EVENTS_TOPIC_ARN=$EVENTS_TOPIC_ARN"
 echo "PRIOR_CREATED_TOPIC_ARN=$PRIOR_CREATED_TOPIC_ARN"
 echo "PRIOR_UPDATED_TOPIC_ARN=$PRIOR_UPDATED_TOPIC_ARN"
+echo "MISSION_STATUS_TOPIC_ARN=$MISSION_STATUS_TOPIC_ARN"
 echo "STREAM_QUEUE_URL=$STREAM_QUEUE_URL"
 echo "PRIOR_QUEUE_URL=$PRIOR_QUEUE_URL"
 echo "PRIOR_DLQ_URL=$PRIOR_DLQ_URL"
+echo "MISSION_STATUS_QUEUE_URL=$MISSION_STATUS_QUEUE_URL"
+echo "MISSION_STATUS_DLQ_URL=$MISSION_STATUS_DLQ_URL"
 ```
 
 ### PowerShell
@@ -298,10 +315,13 @@ $region = "ap-southeast-1"
 $eventsTopicArn = aws sns create-topic --endpoint-url $endpoint --region $region --name rescue-request-events-v1 --query TopicArn --output text
 $priorCreatedTopicArn = aws sns create-topic --endpoint-url $endpoint --region $region --name rescue-prioritization-created-v1 --query TopicArn --output text
 $priorUpdatedTopicArn = aws sns create-topic --endpoint-url $endpoint --region $region --name rescue-prioritization-updated-v1 --query TopicArn --output text
+$missionStatusTopicArn = aws sns create-topic --endpoint-url $endpoint --region $region --name mission-status-changed-v1 --query TopicArn --output text
 
 $streamQueueUrl = aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name rescue-request-events-v1-stream --query QueueUrl --output text
 $priorDlqUrl = aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name rescue-prioritization-evaluated-dlq --query QueueUrl --output text
 $priorDlqArn = aws sqs get-queue-attributes --endpoint-url $endpoint --region $region --queue-url $priorDlqUrl --attribute-names QueueArn --query Attributes.QueueArn --output text
+$missionStatusDlqUrl = aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name rescue-mission-status-changed-dlq --query QueueUrl --output text
+$missionStatusDlqArn = aws sqs get-queue-attributes --endpoint-url $endpoint --region $region --queue-url $missionStatusDlqUrl --attribute-names QueueArn --query Attributes.QueueArn --output text
 
 $redrivePolicy = @{ deadLetterTargetArn = $priorDlqArn; maxReceiveCount = "3" } | ConvertTo-Json -Compress
 $queueAttrs = @{ RedrivePolicy = $redrivePolicy } | ConvertTo-Json -Compress
@@ -309,12 +329,21 @@ $queueAttrsFile = Join-Path $PWD "tmp.create-queue-attrs.json"
 Set-Content -Path $queueAttrsFile -Value $queueAttrs -NoNewline
 $priorQueueUrl = aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name rescue-prioritization-evaluated --attributes file://$queueAttrsFile --query QueueUrl --output text
 
+$missionStatusRedrivePolicy = @{ deadLetterTargetArn = $missionStatusDlqArn; maxReceiveCount = "3" } | ConvertTo-Json -Compress
+$missionStatusQueueAttrs = @{ RedrivePolicy = $missionStatusRedrivePolicy } | ConvertTo-Json -Compress
+$missionStatusQueueAttrsFile = Join-Path $PWD "tmp.create-mission-status-queue-attrs.json"
+Set-Content -Path $missionStatusQueueAttrsFile -Value $missionStatusQueueAttrs -NoNewline
+$missionStatusQueueUrl = aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name rescue-mission-status-changed --attributes file://$missionStatusQueueAttrsFile --query QueueUrl --output text
+
 Write-Host "EVENTS_TOPIC_ARN=$eventsTopicArn"
 Write-Host "PRIOR_CREATED_TOPIC_ARN=$priorCreatedTopicArn"
 Write-Host "PRIOR_UPDATED_TOPIC_ARN=$priorUpdatedTopicArn"
+Write-Host "MISSION_STATUS_TOPIC_ARN=$missionStatusTopicArn"
 Write-Host "STREAM_QUEUE_URL=$streamQueueUrl"
 Write-Host "PRIOR_QUEUE_URL=$priorQueueUrl"
 Write-Host "PRIOR_DLQ_URL=$priorDlqUrl"
+Write-Host "MISSION_STATUS_QUEUE_URL=$missionStatusQueueUrl"
+Write-Host "MISSION_STATUS_DLQ_URL=$missionStatusDlqUrl"
 ```
 
 ### Optional: create deploy-style names in LocalStack (stage suffix)
@@ -332,6 +361,8 @@ aws sns create-topic --endpoint-url "$ENDPOINT" --region "$REGION" --name "rescu
 aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name "rescue-request-events-v1-stream-$STAGE"
 aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name "rescue-prioritization-evaluated-dlq-$STAGE"
 aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name "rescue-prioritization-evaluated-$STAGE"
+aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name "rescue-mission-status-changed-dlq-$STAGE"
+aws sqs create-queue --endpoint-url "$ENDPOINT" --region "$REGION" --queue-name "rescue-mission-status-changed-$STAGE"
 ```
 
 ### PowerShell
@@ -345,6 +376,8 @@ aws sns create-topic --endpoint-url $endpoint --region $region --name "rescue-re
 aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name "rescue-request-events-v1-stream-$stage"
 aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name "rescue-prioritization-evaluated-dlq-$stage"
 aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name "rescue-prioritization-evaluated-$stage"
+aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name "rescue-mission-status-changed-dlq-$stage"
+aws sqs create-queue --endpoint-url $endpoint --region $region --queue-name "rescue-mission-status-changed-$stage"
 ```
 
 If you use deploy-style names in local, also update `.env` and `.env.json` to match those ARNs/names.
@@ -600,8 +633,9 @@ aws sns publish --endpoint-url http://localhost:4566 --region ap-southeast-1 --t
 
 ## Invoke Lambda Locally
 
-`template.local.yaml` now includes SQS event mapping for `IngestPrioritizationEvaluationsFunction`
-to mirror deploy wiring. You can still invoke it directly with `sam local invoke` for deterministic tests.
+`template.local.yaml` now includes SQS event mappings for `IngestPrioritizationEvaluationsFunction`
+and `IngestMissionStatusChangedFunction` to mirror deploy wiring. You can still invoke them directly
+with `sam local invoke` for deterministic tests.
 
 ### Invoke `IngestPrioritizationEvaluationsFunction` (exact command)
 
@@ -620,6 +654,30 @@ sam local invoke IngestPrioritizationEvaluationsFunction \
 ```powershell
 sam local invoke IngestPrioritizationEvaluationsFunction `
   --event sqs-event.json `
+  --template-file template.local.yaml `
+  --env-vars .env.json `
+  --docker-network rescue-net
+```
+
+### Invoke `IngestMissionStatusChangedFunction`
+
+Update `events/sqs/mission_status_changed.json` with a real `requestId` and `incident_id`, then invoke:
+
+### bash
+
+```bash
+sam local invoke IngestMissionStatusChangedFunction \
+  --event events/sqs/mission_status_changed.json \
+  --template-file template.local.yaml \
+  --env-vars .env.json \
+  --docker-network rescue-net
+```
+
+### PowerShell
+
+```powershell
+sam local invoke IngestMissionStatusChangedFunction `
+  --event events/sqs/mission_status_changed.json `
   --template-file template.local.yaml `
   --env-vars .env.json `
   --docker-network rescue-net

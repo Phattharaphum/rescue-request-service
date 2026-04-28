@@ -798,6 +798,9 @@ Returns the latest state snapshot for a rescue request.
 Prioritization-related fields on `currentState`:
 - `latestPriorityEvaluationId`, `latestPriorityReason`, `latestPriorityEvaluatedAt`, `latestPriorityCorrelationId`, `lastPriorityIngestedAt` track the latest evaluated result ingested back into the request.
 
+Mission-related fields on `currentState`:
+- `latestMissionId`, `latestMissionRescueTeamId`, `latestMissionChangedBy`, `latestMissionStatus`, `latestMissionStatusChangedAt`, and `lastMissionStatusIngestedAt` track the latest Mission Progress Service status event ingested through SQS.
+
 **Error responses:** `400` (invalid requestId format), `404`
 
 ---
@@ -1662,7 +1665,63 @@ Accepted result behavior:
 - skips terminal requests
 - applies idempotency key `RescueRequestEvaluatedEvent#{evaluateId}`
 
-### 11.2 Incident Catalog Sync
+### 11.2 Mission Progress Status Ingest
+
+This service consumes `MissionStatusChanged` events from Mission Progress Service.
+
+Queue topology:
+
+- queue: `rescue-mission-status-changed-{stage}`
+- DLQ: `rescue-mission-status-changed-dlq-{stage}`
+
+Optional stack parameter for auto-subscription:
+
+- `MissionStatusChangedTopicArn`
+
+Inbound payload example:
+
+```json
+{
+  "schema_version": "1.0",
+  "mission_id": "mission-123",
+  "requestId": "0933d4b5-2845-4da6-9aed-f2f341e0ee71",
+  "incident_id": "f3e1c8b2-6a1d-4c22-a9f3-5f8b7a1d2e10",
+  "rescue_team_id": "team-alpha",
+  "old_status": "ASSIGNED",
+  "new_status": "EN_ROUTE",
+  "changed_at": "2026-04-29T00:04:00+00:00",
+  "changed_by": "team-alpha"
+}
+```
+
+Consumed fields:
+
+- `new_status`
+- `requestId`
+- `incident_id`
+- `changed_by`
+- plus stored mission context: `mission_id`, `rescue_team_id`
+
+Status mapping:
+
+| Mission Progress `new_status` | Rescue Request `status` |
+|--------------------------------|--------------------------|
+| `EN_ROUTE` | `IN_PROGRESS` |
+| `RESOLVED` | `RESOLVED` |
+
+`ON_SITE` and `NEED_BACKUP` are accepted Mission Progress statuses. They update the latest mission metadata, but do not change the Rescue Request lifecycle status.
+
+Accepted result behavior:
+
+- validates `requestId` exists and `incident_id` matches the request
+- stores `latestMissionId`, `latestMissionRescueTeamId`, `latestMissionChangedBy`, `latestMissionStatus`, and timestamps in `CURRENT`
+- appends a `STATUS_EVENT` only when the mission status maps to a Rescue Request status change
+- publishes `rescue-request.status-changed` for mapped status changes
+- publishes `rescue-request.resolved` when mapped status is `RESOLVED`
+- skips terminal Rescue Request statuses
+- applies idempotency key `MissionStatusChangedEvent#{requestId}#{missionId}#{newStatus}#{changedAt}`
+
+### 11.3 Incident Catalog Sync
 
 Incident data is synchronized from IncidentTracking Service into local `IncidentCatalogTable-{stage}`.
 

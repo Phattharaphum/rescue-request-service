@@ -9,10 +9,14 @@ Parameters:
   PrioritizationUpdatedTopicArn:
     Type: String
     Default: ""
+  MissionStatusChangedTopicArn:
+    Type: String
+    Default: ""
 
 Conditions:
   HasPrioritizationCreatedTopicArn: !Not [!Equals [!Ref PrioritizationCreatedTopicArn, ""]]
   HasPrioritizationUpdatedTopicArn: !Not [!Equals [!Ref PrioritizationUpdatedTopicArn, ""]]
+  HasMissionStatusChangedTopicArn: !Not [!Equals [!Ref MissionStatusChangedTopicArn, ""]]
 
 Globals:
   Api:
@@ -139,6 +143,48 @@ Resources:
       TopicArn: !Ref PrioritizationUpdatedTopicArn
       Protocol: sqs
       Endpoint: !GetAtt RescuePrioritizationEvaluatedQueue.Arn
+
+  MissionStatusChangedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: rescue-mission-status-changed-dlq
+
+  MissionStatusChangedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: rescue-mission-status-changed
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MissionStatusChangedDlq.Arn
+        maxReceiveCount: 3
+
+  MissionStatusChangedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MissionStatusChangedQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowMissionStatusChangedTopicPublish
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt MissionStatusChangedQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !If
+                  - HasMissionStatusChangedTopicArn
+                  - !Ref MissionStatusChangedTopicArn
+                  - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:mission-status-changed-v1*"
+
+  MissionStatusChangedSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasMissionStatusChangedTopicArn
+    Properties:
+      TopicArn: !Ref MissionStatusChangedTopicArn
+      Protocol: sqs
+      Endpoint: !GetAtt MissionStatusChangedQueue.Arn
 
   CreateRescueRequestFunction:
     Type: AWS::Serverless::Function
@@ -426,6 +472,20 @@ Resources:
             FunctionResponseTypes:
               - ReportBatchItemFailures
 
+  IngestMissionStatusChangedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handlers.internal.ingest_mission_status_changed.handler
+      CodeUri: .
+      Events:
+        MissionStatusChangedQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MissionStatusChangedQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
   SyncIncidentCatalogFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -440,4 +500,7 @@ Outputs:
   RescuePrioritizationEvaluatedQueueUrl:
     Description: Local SQS queue URL for RescueRequestEvaluatedEvent ingestion
     Value: !Ref RescuePrioritizationEvaluatedQueue
+  MissionStatusChangedQueueUrl:
+    Description: Local SQS queue URL for MissionStatusChanged ingestion
+    Value: !Ref MissionStatusChangedQueue
 

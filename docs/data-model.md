@@ -110,6 +110,13 @@ Allowed `requestType` values:
 - `latestPriorityEvaluatedAt`
 - `latestPriorityCorrelationId`
 - `lastPriorityIngestedAt`
+- `latestMissionId`
+- `latestMissionIncidentId`
+- `latestMissionRescueTeamId`
+- `latestMissionChangedBy`
+- `latestMissionStatus`
+- `latestMissionStatusChangedAt`
+- `lastMissionStatusIngestedAt`
 
 Notes:
 
@@ -118,6 +125,9 @@ Notes:
   the latest service-owned source event published on `rescue-request-events-v1-{stage}`.
 - These source-event tracking fields are stored in DynamoDB but are intentionally filtered out of
   public/staff REST responses.
+- `latestMission*` fields are populated by the Mission Progress Service `MissionStatusChanged`
+  ingest queue. `latestMissionRescueTeamId`, `latestMissionChangedBy`, and `latestMissionId`
+  preserve the external mission context used to drive request status updates.
 
 #### `STATUS_EVENT`
 
@@ -132,6 +142,8 @@ Notes:
 - `meta`
 - `priorityScore`
 - `responderUnitId`
+- `missionId`
+- `rescueTeamId`
 - `version`
 - `occurredAt`
 
@@ -139,6 +151,8 @@ Notes:
 
 - `changeReason` is populated from request body field `reason` in the current implementation.
 - The initial submission also creates version `1` as a `STATUS_EVENT`.
+- Mission-driven status events set `changedByRole = mission-progress-service` and include
+  `missionId`, `rescueTeamId`, and mission details in `meta`.
 
 #### `CITIZEN_UPDATE`
 

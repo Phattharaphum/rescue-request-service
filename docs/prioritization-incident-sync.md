@@ -1,11 +1,13 @@
-# Prioritization Result Ingest And Incident Sync
+# Prioritization, Mission Status Ingest, And Incident Sync
 
 ## Overview
 
-This document describes the two async integrations currently active in Rescue Request Service:
+This document describes the async integrations currently active in Rescue Request Service:
 
 1. service-owned domain event publishing on `rescue-request-events-v1-{stage}`
-2. inbound prioritization-result ingest plus incident catalog sync
+2. inbound prioritization-result ingest
+3. inbound Mission Progress Service status ingest
+4. incident catalog sync
 
 The REST API remains database-first. Client reads do not call Prioritization Service or
 IncidentTracking Service inline.
@@ -201,6 +203,111 @@ Idempotency remains keyed by:
 
 - `RescueRequestEvaluatedEvent#{evaluateId}`
 
+## Mission Progress Status Ingest
+
+### Ownership Boundary
+
+Mission Progress Service owns mission execution state. Rescue Request Service consumes
+`MissionStatusChanged` events and projects the parts needed by citizen/staff request status.
+
+### Inbound Topic And Queue
+
+- queue: `rescue-mission-status-changed-{stage}`
+- DLQ: `rescue-mission-status-changed-dlq-{stage}`
+- expected external topic: `mission-status-changed-v1` or the ARN supplied by deployment
+
+Optional stack parameter for auto-subscription:
+
+- `MissionStatusChangedTopicArn`
+
+If the ARN is provided, the stack creates the SNS-to-SQS subscription automatically.
+If omitted, the queue still exists and can be subscribed manually by Mission Progress Service.
+
+### Canonical Inbound Contract
+
+Canonical inbound event name:
+
+- `MissionStatusChanged`
+
+Payload:
+
+```json
+{
+  "schema_version": "1.0",
+  "mission_id": "mission-123",
+  "requestId": "request-uuid",
+  "incident_id": "incident-uuid-or-id",
+  "rescue_team_id": "team-alpha",
+  "old_status": "ASSIGNED",
+  "new_status": "EN_ROUTE",
+  "changed_at": "2026-04-29T00:04:00+00:00",
+  "changed_by": "team-alpha"
+}
+```
+
+Required fields:
+
+- `schema_version`
+- `mission_id`
+- `requestId`
+- `incident_id`
+- `rescue_team_id`
+- `new_status`
+- `changed_at`
+- `changed_by`
+
+Accepted Mission Progress statuses:
+
+- `EN_ROUTE`
+- `ON_SITE`
+- `RESOLVED`
+- `NEED_BACKUP`
+
+Status mapping into Rescue Request Service:
+
+| Mission Progress `new_status` | Rescue Request `status` |
+|--------------------------------|--------------------------|
+| `EN_ROUTE` | `IN_PROGRESS` |
+| `RESOLVED` | `RESOLVED` |
+
+`ON_SITE` and `NEED_BACKUP` are accepted and stored as latest mission metadata, but they
+do not currently change the rescue request lifecycle status.
+
+### Validation Rules
+
+- `requestId` must match an existing `CURRENT_STATE.requestId`
+- `incident_id` must match `CURRENT_STATE.incidentId` when the request already has one
+- `changed_at` must be ISO-8601
+- `schema_version` must equal `1.0`
+- `new_status` must be one of the accepted Mission Progress statuses above
+
+### State Updates On Successful Ingest
+
+For all valid mission statuses, the service stores:
+
+- `latestMissionId`
+- `latestMissionIncidentId`
+- `latestMissionRescueTeamId`
+- `latestMissionChangedBy`
+- `latestMissionStatus`
+- `latestMissionStatusChangedAt`
+- `lastMissionStatusIngestedAt`
+
+When `new_status` maps to a Rescue Request status, the service also:
+
+- appends a `STATUS_EVENT`
+- bumps `stateVersion`
+- updates `CURRENT_STATE.status`
+- sets `assignedUnitId` from `rescue_team_id` when present
+- publishes `rescue-request.status-changed`
+- publishes `rescue-request.resolved` when the mapped status is `RESOLVED`
+
+Terminal Rescue Request statuses are acknowledged and skipped.
+
+Idempotency is keyed by:
+
+- `MissionStatusChangedEvent#{requestId}#{missionId}#{newStatus}#{changedAt}`
+
 ## Incident Catalog Sync
 
 ### Resources
@@ -277,6 +384,8 @@ Relevant outputs:
 - `IncidentCatalogTableName`
 - `RescuePrioritizationEvaluatedQueueUrl`
 - `RescuePrioritizationEvaluatedQueueArn`
+- `MissionStatusChangedQueueUrl`
+- `MissionStatusChangedQueueArn`
 - `IncidentTrackingApiSecretArn`
 
 ## Local Development
@@ -308,6 +417,13 @@ aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-
 aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-1 --name rescue-prioritization-updated-v1
 ```
 
+The local bootstrap also creates a Mission Progress test topic and queue:
+
+```powershell
+aws sns create-topic --endpoint-url http://localhost:4566 --region ap-southeast-1 --name mission-status-changed-v1
+aws sqs get-queue-url --endpoint-url http://localhost:4566 --region ap-southeast-1 --queue-name rescue-mission-status-changed
+```
+
 ### Local Secret
 
 ```powershell
@@ -324,5 +440,6 @@ aws secretsmanager create-secret `
 sam local start-api --template-file template.local.yaml --docker-network rescue-net --env-vars .env.json
 ```
 
-`template.local.yaml` now includes SQS event mapping for `IngestPrioritizationEvaluationsFunction`
-to mirror deploy behavior, so queue-driven ingest wiring is aligned between local and deploy templates.
+`template.local.yaml` now includes SQS event mappings for `IngestPrioritizationEvaluationsFunction`
+and `IngestMissionStatusChangedFunction` to mirror deploy behavior, so queue-driven ingest wiring is
+aligned between local and deploy templates.
