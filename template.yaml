@@ -777,7 +777,7 @@ Resources:
   StreamPollerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Handler: src/poller.handler
       CodeUri: stream-service/
       Timeout: 60
@@ -804,7 +804,7 @@ Resources:
   StreamSseFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Handler: src/stream.handler
       CodeUri: stream-service/
       Timeout: 900
