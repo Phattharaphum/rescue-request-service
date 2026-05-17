@@ -2,7 +2,6 @@ from decimal import Decimal
 from typing import Any
 
 from src.adapters.persistence.dynamodb_client import get_dynamodb_resource
-from src.adapters.utils.cursor import decode_cursor, encode_cursor
 from src.shared.config import INCIDENT_CATALOG_TABLE_NAME
 
 CATALOG_PARTITION = "CATALOG"
@@ -88,29 +87,37 @@ def delete_all_incidents() -> int:
     return len(keys)
 
 
-def list_incidents(limit: int = 20, cursor: str | None = None, status: str | None = None) -> dict:
+def list_incidents(
+    statuses: list[str] | None = None,
+) -> dict:
     kwargs: dict[str, Any] = {
         "IndexName": CATALOG_INDEX_NAME,
         "KeyConditionExpression": "catalogPartition = :catalog_partition",
         "ExpressionAttributeValues": {":catalog_partition": CATALOG_PARTITION},
-        "Limit": limit,
         "ScanIndexForward": True,
     }
-    if status:
-        kwargs["FilterExpression"] = "#status = :status"
+    if statuses is not None:
+        if not statuses:
+            return {"items": [], "nextCursor": None}
+        kwargs["FilterExpression"] = "#status IN (" + ", ".join(f":status_{idx}" for idx, _ in enumerate(statuses)) + ")"
         kwargs["ExpressionAttributeNames"] = {"#status": "status"}
-        kwargs["ExpressionAttributeValues"][":status"] = status
-    if cursor:
-        decoded = decode_cursor(cursor)
-        if decoded:
-            kwargs["ExclusiveStartKey"] = decoded
+        for idx, value in enumerate(statuses):
+            kwargs["ExpressionAttributeValues"][f":status_{idx}"] = value
 
-    response = _get_table().query(**kwargs)
-    items = [_convert_decimals(item) for item in response.get("Items", [])]
-    next_cursor = None
-    if response.get("LastEvaluatedKey"):
-        next_cursor = encode_cursor(response["LastEvaluatedKey"])
-    return {"items": items, "nextCursor": next_cursor}
+    items: list[dict] = []
+    last_evaluated_key = None
+    while True:
+        query_kwargs = dict(kwargs)
+        if last_evaluated_key:
+            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+        response = _get_table().query(**query_kwargs)
+        items.extend(_convert_decimals(item) for item in response.get("Items", []))
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+
+    return {"items": items, "nextCursor": None}
 
 
 def upsert_incident(item: dict) -> None:

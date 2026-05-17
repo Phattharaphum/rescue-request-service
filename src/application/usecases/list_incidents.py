@@ -1,11 +1,16 @@
 from src.adapters.persistence.incident_catalog_repository import list_incidents
 
+VISIBLE_INCIDENT_STATUSES = {"REPORTED", "DISPATCHED", "ON-SITE"}
 
-def execute(limit: int = 20, cursor: str | None = None, status: str | None = None) -> dict:
-    result = list_incidents(limit=limit, cursor=cursor, status=status)
+def execute(status: str | None = None) -> dict:
+    statuses = sorted(VISIBLE_INCIDENT_STATUSES)
+    if status:
+        statuses = [status] if status in VISIBLE_INCIDENT_STATUSES else []
+
+    result = list_incidents(statuses=statuses)
     return {
         "items": [_clean_item(item) for item in result["items"]],
-        "nextCursor": result.get("nextCursor"),
+        "nextCursor": None,
     }
 
 
